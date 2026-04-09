@@ -14,6 +14,9 @@ APP_VERSION = "0.1.0"
 PC_PORT = 52000           # PC listens on this port for phone announcements
 ANDROID_SERVER_PORT = 52001  # Phone's HTTP server port
 
+# Disk space: refuse backup if free space on backup drive drops below this
+MIN_FREE_SPACE_BYTES = 200 * 1024 * 1024  # 200 MB buffer
+
 # mDNS
 SERVICE_TYPE = "_lcloud._tcp.local."
 PC_SERVICE_NAME = f"lcloud-pc.{SERVICE_TYPE}"

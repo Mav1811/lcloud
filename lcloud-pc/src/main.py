@@ -1,6 +1,7 @@
 """
 Lcloud PC App — Entry Point
-Wires together: settings, discovery, backup engine, tray, and main window.
+All components are wired together through LcloudApp so callbacks
+are always defined before they are referenced.
 """
 import logging
 import sys
@@ -15,80 +16,143 @@ from ui.tray import LcloudTray
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
-    setup_logging()
-    logger.info("Lcloud starting up...")
+class LcloudApp:
+    """
+    Owns every component and wires them together.
+    Using a class ensures all callbacks exist before any component
+    stores a reference to them.
+    """
 
-    settings = Settings()
-    settings.load()
+    def __init__(self) -> None:
+        setup_logging()
+        logger.info("Lcloud starting up...")
 
-    # --- Create components ---
-    window = LcloudWindow(
-        on_folder_change=_on_folder_change,
-        on_backup_now=_on_backup_now,
-    )
+        self.settings = Settings()
+        self.settings.load()
 
-    engine = BackupEngine()
-    tray = LcloudTray(
-        on_open=window.show,
-        on_quit=_quit,
-    )
+        self._connected_phone: dict | None = None  # {name, address, port}
 
-    discovery = LcloudDiscovery(
-        on_phone_found=_on_phone_found,
-        on_phone_lost=_on_phone_lost,
-        port=settings.port,
-    )
+        self.window = LcloudWindow(
+            on_folder_change=self._on_folder_change,
+            on_backup_now=self._on_backup_now,
+            on_settings_change=self._on_settings_change,
+            current_port=self.settings.port,
+        )
+        self.engine = BackupEngine()
+        self.tray = LcloudTray(
+            on_open=self.window.show,
+            on_quit=self._quit,
+        )
+        self.discovery = LcloudDiscovery(
+            on_phone_found=self._on_phone_found,
+            on_phone_lost=self._on_phone_lost,
+            port=self.settings.port,
+        )
 
-    # --- Inject dependencies into callbacks via closures ---
-    def _on_folder_change(folder: Path) -> None:
-        settings.backup_folder = str(folder)
-        settings.save()
-        engine.set_backup_folder(folder)
-        logger.info("Backup folder changed to: %s", folder)
+    # ------------------------------------------------------------------
+    # Callbacks — all defined before any component runs
+    # ------------------------------------------------------------------
 
-    def _on_backup_now() -> None:
-        # In v0.1 this signals the engine to request backup from connected phone
-        # Full implementation requires phone connection state tracking (v0.2)
-        logger.info("Backup Now requested by user.")
-        window.update_status("Waiting for phone to respond...", "#f59e0b")
+    def _on_folder_change(self, folder: Path) -> None:
+        self.settings.backup_folder = str(folder)
+        self.settings.save()
+        self.engine.set_backup_folder(folder)
+        logger.info("Backup folder set to: %s", folder)
 
-    def _on_phone_found(name: str, address: str, port: int) -> None:
-        logger.info("Phone found: %s @ %s:%s", name, address, port)
-        window.update_phone_status(connected=True, phone_name=name.split(".")[0])
-        tray.set_tooltip(f"Lcloud — Phone connected: {name}")
+    def _on_backup_now(self) -> None:
+        if self._connected_phone:
+            name = self._connected_phone["name"]
+            self.window.show_info(
+                "Start Backup on Phone",
+                f"'{name}' is connected.\n\n"
+                f"Tap  Backup Now  in the Lcloud app on your Android phone to start the backup.",
+            )
+        else:
+            self.window.show_info(
+                "No Phone Connected",
+                "No phone found on WiFi.\n\n"
+                "Make sure:\n"
+                "  \u2022 Both devices are on the same WiFi network\n"
+                "  \u2022 The Lcloud app is open on your Android phone",
+            )
 
-    def _on_phone_lost(name: str) -> None:
-        logger.info("Phone lost: %s", name)
-        window.update_phone_status(connected=False)
-        tray.set_tooltip("Lcloud — No phone connected")
+    def _on_settings_change(self, port: int) -> None:
+        self.settings.port = port
+        self.settings.save()
+        logger.info("Settings saved — port: %s (restart to apply)", port)
 
-    def _quit() -> None:
+    def _on_phone_found(self, name: str, address: str, port: int) -> None:
+        display = name.split(".")[0]
+        self._connected_phone = {"name": display, "address": address, "port": port}
+        self.engine.set_phone(address, port)
+        self.window.update_phone_status(connected=True, phone_name=display)
+        self.tray.set_tooltip(f"Lcloud \u2014 {display} connected")
+        logger.info("Phone connected: %s @ %s:%s", display, address, port)
+
+    def _on_phone_lost(self, name: str) -> None:
+        self._connected_phone = None
+        self.engine.set_phone(None, None)
+        self.window.update_phone_status(connected=False)
+        self.tray.set_tooltip("Lcloud \u2014 Waiting for phone")
+        logger.info("Phone disconnected: %s", name)
+
+    def _on_disk_full(self, free_bytes: int, needed_bytes: int) -> None:
+        free_mb = free_bytes // (1024 * 1024)
+        needed_mb = needed_bytes // (1024 * 1024)
+        self.window.show_warning(
+            "Not Enough Disk Space",
+            f"Backup stopped \u2014 not enough space on PC.\n\n"
+            f"Free space:   {free_mb} MB\n"
+            f"Space needed: {needed_mb} MB\n\n"
+            f"Free up space on your PC and try again.",
+        )
+        self.window.update_status("Backup stopped \u2014 not enough disk space", "#ef4444")
+
+    def _quit(self) -> None:
         logger.info("Quit requested.")
-        discovery.stop()
-        engine.stop_server()
-        window.quit()
+        self.discovery.stop()
+        self.engine.stop_server()
+        # Schedule destroy on the main thread (tray calls this from a daemon thread)
+        self.window.after(0, self.window.destroy)
+
+    # ------------------------------------------------------------------
+    # Startup
+    # ------------------------------------------------------------------
+
+    def run(self) -> None:
+        # Restore saved backup folder
+        if self.settings.backup_folder:
+            folder = Path(self.settings.backup_folder)
+            if folder.exists():
+                self.window.set_backup_folder(folder)
+                self.engine.set_backup_folder(folder)
+
+        backup_folder = (
+            Path(self.settings.backup_folder)
+            if self.settings.backup_folder
+            else Path.home() / "lcloud_backup"
+        )
+
+        self.engine.start_server(
+            backup_folder=backup_folder,
+            on_progress=self.window.update_progress,
+            on_complete=self.window.complete_progress,
+            on_disk_full=self._on_disk_full,
+            port=self.settings.port,
+        )
+        self.discovery.start()
+        self.tray.start()
+
+        logger.info("All services started. Running UI loop.")
+        self.window.mainloop()
+        # mainloop() returns when window is destroyed (on quit)
+        logger.info("Lcloud exited.")
         sys.exit(0)
 
-    # --- Restore previous backup folder ---
-    if settings.backup_folder:
-        folder = Path(settings.backup_folder)
-        if folder.exists():
-            window.set_backup_folder(folder)
-            engine.set_backup_folder(folder)
 
-    # --- Start services ---
-    engine.start_server(
-        backup_folder=Path(settings.backup_folder) if settings.backup_folder else Path.home() / "lcloud_backup",
-        on_progress=window.update_progress,
-        on_complete=window.complete_progress,
-        port=settings.port,
-    )
-    discovery.start()
-    tray.start()
-
-    logger.info("All services started. Running UI loop.")
-    window.mainloop()
+def main() -> None:
+    app = LcloudApp()
+    app.run()
 
 
 if __name__ == "__main__":

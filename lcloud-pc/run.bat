@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 echo Starting Lcloud...
 if not exist venv\Scripts\activate (
     echo [ERROR] Virtual environment not found. Run setup.bat first.
