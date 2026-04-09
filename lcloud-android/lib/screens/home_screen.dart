@@ -153,8 +153,20 @@ class _HomeScreenState extends State<HomeScreen> {
           )
           .timeout(const Duration(seconds: 15));
 
+      if (response.statusCode == 507) {
+        final body = jsonDecode(response.body) as Map<String, dynamic>;
+        final freeMb = ((body['free_bytes'] as int? ?? 0) / (1024 * 1024)).round();
+        final needMb = ((body['needed_bytes'] as int? ?? 0) / (1024 * 1024)).round();
+        throw Exception(
+          'PC storage is full.\nFree: ${freeMb} MB  ·  Needed: ${needMb} MB\n'
+          'Free up space on your PC and try again.',
+        );
+      }
+      if (response.statusCode == 503) {
+        throw Exception('PC has no backup folder set.\nOpen Lcloud on your PC and choose a backup folder.');
+      }
       if (response.statusCode != 200) {
-        throw Exception('PC rejected backup: ${response.body}');
+        throw Exception('PC rejected backup (${response.statusCode}): ${response.body}');
       }
 
       // PC is now downloading files from our server

@@ -9,10 +9,18 @@
 
 <!-- ADD / EDIT TASKS HERE — Claude reads this at the start of every session -->
 
-- [ ] Implement smart priority engine (WhatsApp → Photos → Videos → Docs) — v0.2
-- [ ] Implement storage threshold trigger (phone below 15% free → auto-backup) — v0.2
-- [ ] Add "Delete after backup?" prompt on Android — v0.2
-- [ ] Progress bar with speed + ETA on both PC and Android — v0.2
+### v0.1 — Done ✅
+- [x] PC app complete and working (run with lcloud-pc/run.bat)
+- [x] Android APK built (lcloud-android.apk at project root — rebuild with build-android.bat)
+- [x] Disk space check — PC warns and rejects backup if not enough space (Q14)
+- [x] Settings panel on PC — gear button to configure port (Q23)
+- [x] Clear error messages for disk full, no folder set
+
+### v0.2 — Next
+- [ ] Implement smart priority engine (WhatsApp → Photos → Videos → Docs)
+- [ ] Implement storage threshold trigger (phone below 15% free → auto-backup)
+- [ ] Add "Delete after backup?" — actually execute the delete (currently shows "coming in v0.3")
+- [ ] Progress bar with speed + ETA on both sides
 
 ---
 
@@ -27,6 +35,17 @@ No cloud, no internet, no account. Files stay local.
 
 **Current version:** v0.1.0 — full prototype working. Manual backup only.
 **Next milestone:** v0.2.0 — priority engine + auto-trigger.
+
+---
+
+## Build Environment
+
+| Tool | Location | Notes |
+|------|----------|-------|
+| Flutter 3.41.6 | `H:\fun\tools\flutter\bin` | Add to PATH or use full path |
+| JDK 17 (Microsoft) | `H:\fun\tools\jdk-17.0.18+8` | Flutter configured to use this via `flutter config --jdk-dir` |
+| Android SDK | `C:\Users\{user}\AppData\Local\Android\Sdk` | Already set up |
+| Python 3.12 | System PATH | Used for PC app |
 
 ---
 

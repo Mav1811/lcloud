@@ -68,9 +68,10 @@ class _PermissionsGateState extends State<_PermissionsGate> {
       (s) => s.isGranted || s.isLimited,
     );
 
+    final manageGranted = await Permission.manageExternalStorage.isGranted;
     if (mounted) {
       setState(() {
-        _permissionsGranted = allGranted || await Permission.manageExternalStorage.isGranted;
+        _permissionsGranted = allGranted || manageGranted;
         _checking = false;
         _statusMessage = _permissionsGranted
             ? 'Permissions granted'
