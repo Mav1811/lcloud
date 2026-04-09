@@ -17,9 +17,12 @@ lcloud-android/android/local.properties
 lcloud-android/.idea/
 *.class
 
-# Built APKs (too large for git — rebuild with: flutter build apk --release)
+# Built binaries (too large for git — rebuild with build scripts)
 *.apk
 *.aab
+Lcloud.exe
+lcloud-pc/dist/
+lcloud-pc/build/
 
 # OS
 .DS_Store
