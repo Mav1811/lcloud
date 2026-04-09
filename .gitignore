@@ -1,0 +1,28 @@
+# Python
+lcloud-pc/venv/
+lcloud-pc/__pycache__/
+lcloud-pc/src/__pycache__/
+lcloud-pc/src/core/__pycache__/
+lcloud-pc/src/ui/__pycache__/
+lcloud-pc/.pytest_cache/
+*.pyc
+*.pyo
+
+# Flutter / Android
+lcloud-android/.dart_tool/
+lcloud-android/.flutter-plugins
+lcloud-android/.flutter-plugins-dependencies
+lcloud-android/build/
+lcloud-android/android/.gradle/
+lcloud-android/android/app/build/
+lcloud-android/android/local.properties
+lcloud-android/.idea/
+*.class
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
