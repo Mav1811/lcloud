@@ -1,0 +1,105 @@
+"""
+Lcloud PC App — Configuration
+All constants and settings live here. Never use magic strings elsewhere.
+"""
+import json
+import logging
+import os
+from pathlib import Path
+
+APP_NAME = "Lcloud"
+APP_VERSION = "0.1.0"
+
+# Networking
+PC_PORT = 52000           # PC listens on this port for phone announcements
+ANDROID_SERVER_PORT = 52001  # Phone's HTTP server port
+
+# mDNS
+SERVICE_TYPE = "_lcloud._tcp.local."
+PC_SERVICE_NAME = f"lcloud-pc.{SERVICE_TYPE}"
+
+# File categories (extensions → folder name)
+PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".heic", ".webp", ".bmp", ".tiff"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".3gp", ".wmv", ".m4v", ".flv"}
+DOCUMENT_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+    ".txt", ".csv", ".odt", ".ods", ".odp", ".rtf",
+}
+WHATSAPP_PATH_MARKERS = ["whatsapp", "WhatsApp"]
+
+CATEGORY_FOLDERS = {
+    "whatsapp": "WhatsApp",
+    "photo": "Photos",
+    "video": "Videos",
+    "document": "Documents",
+    "other": "Other",
+}
+
+WHATSAPP_SUBCATEGORIES = {
+    "image": "Images",
+    "video": "Video",
+    "audio": "Audio",
+    "document": "Documents",
+    "gif": "GIF",
+}
+
+# Settings storage
+def _settings_path() -> Path:
+    appdata = os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+    return Path(appdata) / "lcloud" / "settings.json"
+
+# Log file
+def _log_path() -> Path:
+    appdata = os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+    return Path(appdata) / "lcloud" / "lcloud.log"
+
+
+class Settings:
+    """Persistent settings — loaded from and saved to JSON."""
+
+    def __init__(self) -> None:
+        self.backup_folder: str | None = None
+        self.dark_mode: bool = True
+        self.port: int = PC_PORT
+        self._path = _settings_path()
+
+    def load(self) -> None:
+        """Load settings from disk. Silently creates defaults if file missing."""
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            if self._path.exists():
+                data = json.loads(self._path.read_text(encoding="utf-8"))
+                self.backup_folder = data.get("backup_folder")
+                self.dark_mode = data.get("dark_mode", True)
+                self.port = data.get("port", PC_PORT)
+        except (json.JSONDecodeError, OSError) as exc:
+            logging.warning("Could not load settings: %s — using defaults.", exc)
+
+    def save(self) -> None:
+        """Save current settings to disk."""
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            data = {
+                "backup_folder": self.backup_folder,
+                "dark_mode": self.dark_mode,
+                "port": self.port,
+            }
+            self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except OSError as exc:
+            logging.error("Could not save settings: %s", exc)
+
+
+def setup_logging() -> None:
+    """Configure logging to file + console."""
+    log_path = _log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    logging.basicConfig(
+        level=logging.INFO,
+        format=fmt,
+        handlers=[
+            logging.FileHandler(log_path, encoding="utf-8"),
+            logging.StreamHandler(),
+        ],
+    )
