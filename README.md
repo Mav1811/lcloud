@@ -38,7 +38,8 @@ See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for full setup instructions.
 lcloud/
 ├── lcloud-pc/        Windows app (Python + CustomTkinter)
 ├── lcloud-android/   Android app (Flutter/Dart)
-├── docs/             User guide, developer guide, design spec
+├── docs/             User guide, developer guide
+│   └── specs/        Design specification
 ├── tools/            Setup scripts
 ├── ROADMAP.md        Feature plan by version
 └── CHANGELOG.md      What changed in each version

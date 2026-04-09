@@ -1,12 +1,10 @@
 # Python
 lcloud-pc/venv/
-lcloud-pc/__pycache__/
-lcloud-pc/src/__pycache__/
-lcloud-pc/src/core/__pycache__/
-lcloud-pc/src/ui/__pycache__/
-lcloud-pc/.pytest_cache/
+**/__pycache__/
+**/.pytest_cache/
 *.pyc
 *.pyo
+*.log
 
 # Flutter / Android
 lcloud-android/.dart_tool/
@@ -23,6 +21,3 @@ lcloud-android/.idea/
 .DS_Store
 Thumbs.db
 desktop.ini
-
-# Logs
-*.log
