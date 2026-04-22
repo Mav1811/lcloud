@@ -24,7 +24,16 @@ Lcloud.exe
 lcloud-pc/dist/
 lcloud-pc/build/
 
+# TLS certs (generated at runtime in %LOCALAPPDATA%\lcloud\ — not in repo)
+*.crt
+*.key
+*.pem
+
 # OS
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Claude Code project settings (local only)
+.claude/settings.local.json
+.claude/worktrees/

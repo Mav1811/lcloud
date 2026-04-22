@@ -8,29 +8,57 @@ No cloud. No internet. No account. Just your files, safe on your PC.
 
 ## What It Does
 
-- Automatically backs up your phone when storage gets low (below 15%)
-- Backs up WhatsApp media, photos, videos, and documents
-- Organizes everything neatly: `Photos/2025/04/`, `WhatsApp/Images/`, etc.
-- Backs up important stuff first (WhatsApp → Photos → Videos → Documents)
-- Works over your home WiFi — no cables, no internet
+- Backs up photos, videos, WhatsApp media, and documents over your home WiFi
+- Organizes everything neatly: `Photos/2026/04/`, `WhatsApp/Images/`, etc.
+- Works over home WiFi — no cables, no internet required
+- Uses HTTPS with certificate fingerprint trust — no setup for the user
 
 ## What Makes It Different
 
-Two features no other backup app has:
+Two features no other free backup app has:
 
-1. **Smart Priority Engine** — backs up your WhatsApp media first, then newest photos, then videos, then documents. Not random.
-2. **Storage Threshold Trigger** — when your phone is below 15% free, backup starts automatically. Set it and forget it.
+1. **Smart Priority Engine** *(coming v0.3)* — backs up WhatsApp media first, then newest photos, then videos, then documents. Not random.
+2. **Storage Threshold Trigger** *(coming v0.3)* — when your phone is below 15% free, backup starts automatically. Set it and forget it.
+
+## Current Status
+
+| Version | Status | What It Has |
+|---------|--------|-------------|
+| v0.1 | ✅ Shipped | Manual backup, file organization, WiFi transfer |
+| v0.2 | ✅ Shipped | Secure HTTPS transport, cert fingerprint trust, real progress tracking |
+| v0.3 | 🔨 In Progress | File restore — browse backed-up files and restore to phone |
+| v0.4 | Planned | AES-256-GCM at-rest encryption |
+| v0.5 | Planned | Open source release, Windows auto-start |
 
 ## Quick Start
 
-See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for full setup instructions.
+**PC:**
+```bat
+cd lcloud-pc
+setup.bat    # first time only
+run.bat      # start Lcloud
+```
 
-**Short version:**
-1. Install Python 3.12 (check "Add to PATH")
-2. Run `lcloud-pc/setup.bat`
-3. Install Flutter → run `tools/install_flutter.bat`
-4. Build Android app: `cd lcloud-android && flutter run`
-5. Start PC app: `lcloud-pc/run.bat`
+**Android:** Install `lcloud-android.apk` from the releases section, or build from source:
+```bat
+cd lcloud-android
+flutter run
+```
+
+## How It Works
+
+```
+Your Phone (Android)                 Your PC (Windows)
+──────────────────                   ─────────────────
+Discovers PC on WiFi    ─────────►  PC broadcasts presence every 2s
+Verifies PC identity               (multicast UDP on home WiFi)
+via cert fingerprint
+
+Taps "Backup Now"       ─────────►  PC receives files over HTTPS
+Files stream to PC                  Files organized into folders
+```
+
+No IP typing. No pairing codes. Just open both apps and tap Backup Now.
 
 ## Project Structure
 
@@ -38,18 +66,13 @@ See [docs/USER_GUIDE.md](docs/USER_GUIDE.md) for full setup instructions.
 lcloud/
 ├── lcloud-pc/        Windows app (Python + CustomTkinter)
 ├── lcloud-android/   Android app (Flutter/Dart)
-├── docs/             User guide, developer guide
-│   └── specs/        Design specification
-├── tools/            Setup scripts
+├── docs/             Guides, specs, research
+│   ├── USER_GUIDE.md
+│   ├── DEV_GUIDE.md
+│   └── research/     Market analysis, competitor comparison
 ├── ROADMAP.md        Feature plan by version
 └── CHANGELOG.md      What changed in each version
 ```
-
-## Version
-
-**Current: v0.1.0** — Working prototype. Manual backup, file organization, WiFi transfer.
-
-See [ROADMAP.md](ROADMAP.md) for what's coming.
 
 ## Tech Stack
 
@@ -57,9 +80,21 @@ See [ROADMAP.md](ROADMAP.md) for what's coming.
 |-----------|-----------|
 | Android app | Flutter (Dart) |
 | Windows app | Python 3.12 + CustomTkinter |
-| Device discovery | mDNS / Zeroconf |
-| File transfer | HTTP over local WiFi |
+| Device discovery | UDP multicast (224.0.0.167:53317) |
+| File transfer | HTTPS with self-signed cert + fingerprint trust |
 | Storage | Local only — your PC, your files |
+
+## Build Environment
+
+| Tool | Location |
+|------|----------|
+| Flutter 3.41.6 | `H:\fun\tools\flutter\bin` |
+| JDK 17 | `H:\fun\tools\jdk-17.0.18+8` |
+| Python 3.12 | System PATH |
+
+## Contributing
+
+This project is being built in the open. Contributions welcome once v0.5 releases.
 
 ## License
 

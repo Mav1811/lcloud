@@ -8,18 +8,16 @@ import os
 from pathlib import Path
 
 APP_NAME = "Lcloud"
-APP_VERSION = "0.1.0"
+APP_VERSION = "0.2.0"
 
-# Networking
-PC_PORT = 52000           # PC listens on this port for phone announcements
-ANDROID_SERVER_PORT = 52001  # Phone's HTTP server port
+# Networking — LocalSend-inspired protocol
+LCLOUD_PORT = 53317          # PC HTTPS server (same port as LocalSend)
+MULTICAST_GROUP = "224.0.0.167"
+MULTICAST_PORT = 53317
+PROTOCOL_VERSION = "1.0"
 
 # Disk space: refuse backup if free space on backup drive drops below this
 MIN_FREE_SPACE_BYTES = 200 * 1024 * 1024  # 200 MB buffer
-
-# mDNS
-SERVICE_TYPE = "_lcloud._tcp.local."
-PC_SERVICE_NAME = f"lcloud-pc.{SERVICE_TYPE}"
 
 # File categories (extensions → folder name)
 PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".heic", ".webp", ".bmp", ".tiff"}
@@ -37,6 +35,9 @@ CATEGORY_FOLDERS = {
     "document": "Documents",
     "other": "Other",
 }
+
+# Restore manifests — written after every completed backup session
+MANIFEST_SUBDIR = ".lcloud/manifests"   # relative to backup_root
 
 WHATSAPP_SUBCATEGORIES = {
     "image": "Images",
@@ -56,6 +57,18 @@ def _log_path() -> Path:
     appdata = os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
     return Path(appdata) / "lcloud" / "lcloud.log"
 
+# TLS certificate paths
+def _cert_path() -> Path:
+    appdata = os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+    return Path(appdata) / "lcloud" / "lcloud.crt"
+
+def _key_path() -> Path:
+    appdata = os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+    return Path(appdata) / "lcloud" / "lcloud.key"
+
+CERT_PATH: Path = _cert_path()
+KEY_PATH: Path = _key_path()
+
 
 class Settings:
     """Persistent settings — loaded from and saved to JSON."""
@@ -63,7 +76,7 @@ class Settings:
     def __init__(self) -> None:
         self.backup_folder: str | None = None
         self.dark_mode: bool = True
-        self.port: int = PC_PORT
+        self.port: int = LCLOUD_PORT
         self._path = _settings_path()
 
     def load(self) -> None:
@@ -74,7 +87,7 @@ class Settings:
                 data = json.loads(self._path.read_text(encoding="utf-8"))
                 self.backup_folder = data.get("backup_folder")
                 self.dark_mode = data.get("dark_mode", True)
-                self.port = data.get("port", PC_PORT)
+                self.port = data.get("port", LCLOUD_PORT)
         except (json.JSONDecodeError, OSError) as exc:
             logging.warning("Could not load settings: %s — using defaults.", exc)
 

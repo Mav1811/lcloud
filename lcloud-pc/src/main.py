@@ -1,14 +1,15 @@
 """
 Lcloud PC App — Entry Point
-All components are wired together through LcloudApp so callbacks
-are always defined before they are referenced.
+Wires all components together: HTTPS server, multicast discovery, UI, tray.
 """
 import logging
+import socket
 import sys
 from pathlib import Path
 
-from config import Settings, setup_logging
+from config import CERT_PATH, KEY_PATH, LCLOUD_PORT, Settings, setup_logging
 from core.backup_engine import BackupEngine
+from core.certs import get_fingerprint, load_or_generate
 from core.discovery import LcloudDiscovery
 from ui.main_window import LcloudWindow
 from ui.tray import LcloudTray
@@ -30,7 +31,10 @@ class LcloudApp:
         self.settings = Settings()
         self.settings.load()
 
-        self._connected_phone: dict | None = None  # {name, address, port}
+        # Load or generate TLS certificate (runs once on first launch)
+        self._cert_pem, _ = load_or_generate(CERT_PATH, KEY_PATH)
+        self._fingerprint = get_fingerprint(self._cert_pem)
+        self._alias = socket.gethostname()
 
         self.window = LcloudWindow(
             on_folder_change=self._on_folder_change,
@@ -44,13 +48,13 @@ class LcloudApp:
             on_quit=self._quit,
         )
         self.discovery = LcloudDiscovery(
-            on_phone_found=self._on_phone_found,
-            on_phone_lost=self._on_phone_lost,
+            alias=self._alias,
+            fingerprint=self._fingerprint,
             port=self.settings.port,
         )
 
     # ------------------------------------------------------------------
-    # Callbacks — all defined before any component runs
+    # Callbacks
     # ------------------------------------------------------------------
 
     def _on_folder_change(self, folder: Path) -> None:
@@ -60,44 +64,18 @@ class LcloudApp:
         logger.info("Backup folder set to: %s", folder)
 
     def _on_backup_now(self) -> None:
-        if self._connected_phone:
-            name = self._connected_phone["name"]
-            self.window.show_info(
-                "Start Backup on Phone",
-                f"'{name}' is connected.\n\n"
-                f"Tap  Backup Now  in the Lcloud app on your Android phone to start the backup.",
-            )
-        else:
-            self.window.show_info(
-                "No Phone Connected",
-                "No phone found on WiFi.\n\n"
-                "Make sure:\n"
-                "  \u2022 Both devices are on the same WiFi network\n"
-                "  \u2022 The Lcloud app is open on your Android phone",
-            )
+        self.window.show_info(
+            "Start Backup on Phone",
+            "Open the Lcloud app on your Android phone and tap  Backup Now  to start.",
+        )
 
     def _on_settings_change(self, port: int) -> None:
         self.settings.port = port
         self.settings.save()
         logger.info("Settings saved — port: %s (restart to apply)", port)
 
-    def _on_phone_found(self, name: str, address: str, port: int) -> None:
-        display = name.split(".")[0]
-        self._connected_phone = {"name": display, "address": address, "port": port}
-        self.engine.set_phone(address, port)
-        self.window.update_phone_status(connected=True, phone_name=display)
-        self.tray.set_tooltip(f"Lcloud \u2014 {display} connected")
-        logger.info("Phone connected: %s @ %s:%s", display, address, port)
-
-    def _on_phone_lost(self, name: str) -> None:
-        self._connected_phone = None
-        self.engine.set_phone(None, None)
-        self.window.update_phone_status(connected=False)
-        self.tray.set_tooltip("Lcloud \u2014 Waiting for phone")
-        logger.info("Phone disconnected: %s", name)
-
     def _on_disk_full(self, free_bytes: int, needed_bytes: int) -> None:
-        free_mb = free_bytes // (1024 * 1024)
+        free_mb   = free_bytes   // (1024 * 1024)
         needed_mb = needed_bytes // (1024 * 1024)
         self.window.show_warning(
             "Not Enough Disk Space",
@@ -112,7 +90,6 @@ class LcloudApp:
         logger.info("Quit requested.")
         self.discovery.stop()
         self.engine.stop_server()
-        # Schedule destroy on the main thread (tray calls this from a daemon thread)
         self.window.after(0, self.window.destroy)
 
     # ------------------------------------------------------------------
@@ -120,21 +97,25 @@ class LcloudApp:
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        # Restore saved backup folder
-        if self.settings.backup_folder:
-            folder = Path(self.settings.backup_folder)
-            if folder.exists():
-                self.window.set_backup_folder(folder)
-                self.engine.set_backup_folder(folder)
-
         backup_folder = (
             Path(self.settings.backup_folder)
             if self.settings.backup_folder
             else Path.home() / "lcloud_backup"
         )
 
+        # Restore saved backup folder in UI
+        if self.settings.backup_folder:
+            folder = Path(self.settings.backup_folder)
+            if folder.exists():
+                self.window.set_backup_folder(folder)
+                self.engine.set_backup_folder(folder)
+
         self.engine.start_server(
             backup_folder=backup_folder,
+            cert_path=CERT_PATH,
+            key_path=KEY_PATH,
+            alias=self._alias,
+            fingerprint=self._fingerprint,
             on_progress=self.window.update_progress,
             on_complete=self.window.complete_progress,
             on_disk_full=self._on_disk_full,
@@ -143,9 +124,10 @@ class LcloudApp:
         self.discovery.start()
         self.tray.start()
 
-        logger.info("All services started. Running UI loop.")
+        logger.info(
+            "All services started. Fingerprint: %s...", self._fingerprint[:16]
+        )
         self.window.mainloop()
-        # mainloop() returns when window is destroyed (on quit)
         logger.info("Lcloud exited.")
         sys.exit(0)
 

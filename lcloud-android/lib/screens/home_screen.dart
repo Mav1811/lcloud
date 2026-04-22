@@ -1,14 +1,13 @@
-import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/backup_file.dart';
 import '../models/backup_session.dart';
 import '../services/discovery.dart';
 import '../services/file_scanner.dart';
-import '../services/http_server.dart';
+import '../services/transfer_client.dart';
 import '../widgets/progress_card.dart';
 import '../widgets/status_card.dart' as sc;
 import 'settings_screen.dart';
@@ -17,9 +16,6 @@ const Color _bgColor = Color(0xFF1a1a2e);
 const Color _cardColor = Color(0xFF16213e);
 const Color _accentColor = Color(0xFF4f46e5);
 const Color _textSecondary = Color(0xFF94a3b8);
-
-const String _pcPortKey = 'pc_port';
-const int _defaultPcPort = 52000;
 
 /// Main backup screen.
 class HomeScreen extends StatefulWidget {
@@ -30,77 +26,71 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  // Discovery
   sc.ConnectionState _connectionState = sc.ConnectionState.searching;
-  String? _pcName;
-  String? _pcAddress;
-  int _pcPort = _defaultPcPort;
+  DiscoveredPC? _pc;
 
+  // File scan
   List<BackupFile> _filesToBackup = [];
   bool _scanning = false;
-  bool _backingUp = false;
 
-  // Progress
+  // Backup progress
+  bool _backingUp = false;
   String _currentFile = '';
   int _currentIndex = 0;
   int _totalFiles = 0;
   int _bytesTransferred = 0;
   int _totalBytes = 0;
 
-  // History
+  // History (in-memory for now)
   final List<BackupSession> _sessions = [];
 
   final LcloudDiscovery _discovery = LcloudDiscovery();
-  final LcloudHttpServer _fileServer = LcloudHttpServer();
   final FileScanner _scanner = FileScanner();
 
   @override
   void initState() {
     super.initState();
-    _loadPort();
-    _startDiscovery();
     _scanFiles();
+    _startDiscovery();
   }
 
   @override
   void dispose() {
     _discovery.stopDiscovery();
-    _fileServer.stop();
     super.dispose();
   }
 
   // ---------------------------------------------------------------------------
-  // Initialization
+  // Discovery
   // ---------------------------------------------------------------------------
 
-  Future<void> _loadPort() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() => _pcPort = prefs.getInt(_pcPortKey) ?? _defaultPcPort);
+  void _startDiscovery() {
+    if (mounted) setState(() => _connectionState = sc.ConnectionState.searching);
+    _discovery.startListening(onFound: _onPCFound);
   }
 
-  Future<void> _startDiscovery() async {
-    setState(() => _connectionState = sc.ConnectionState.searching);
-    final pc = await _discovery.findPC();
-    if (pc != null && mounted) {
+  void _onPCFound(DiscoveredPC pc) {
+    if (!mounted) return;
+    // Only update state when PC changes (avoids rebuilds every 2 s)
+    if (_pc?.address != pc.address || _pc?.fingerprint != pc.fingerprint) {
       setState(() {
-        _pcAddress = pc.address;
-        _pcPort = pc.port;
-        _pcName = pc.name;
+        _pc = pc;
         _connectionState = sc.ConnectionState.found;
       });
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // File scanning
+  // ---------------------------------------------------------------------------
+
   Future<void> _scanFiles() async {
     setState(() => _scanning = true);
     try {
       final files = await _scanner.scanAll();
-      if (mounted) {
-        setState(() {
-          _filesToBackup = files;
-          _scanning = false;
-        });
-      }
-    } catch (e) {
+      if (mounted) setState(() { _filesToBackup = files; _scanning = false; });
+    } catch (_) {
       if (mounted) setState(() => _scanning = false);
     }
   }
@@ -110,8 +100,9 @@ class _HomeScreenState extends State<HomeScreen> {
   // ---------------------------------------------------------------------------
 
   Future<void> _startBackup() async {
-    if (_pcAddress == null) {
-      _showSnack('No PC connected. Make sure PC app is running on the same WiFi.');
+    final pc = _pc;
+    if (pc == null) {
+      _showSnack('No PC found. Make sure Lcloud is running on your PC.');
       return;
     }
     if (_filesToBackup.isEmpty) {
@@ -119,91 +110,87 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
 
+    // Build TransferFile list from scanned BackupFiles
+    final transferFiles = _filesToBackup.map((f) => TransferFile(
+          fileId: f.path.hashCode.toRadixString(16),
+          fileName: f.name,
+          fileSize: f.sizeBytes,
+          fileType: _mimeType(f.name),
+          path: f.path,
+          category: f.category,
+          modifiedAt: f.modifiedAt,
+        )).toList();
+
+    final client = TransferClient(
+      pcAddress: pc.address,
+      pcPort: pc.port,
+      fingerprint: pc.fingerprint,
+    );
+
     setState(() {
       _backingUp = true;
       _connectionState = sc.ConnectionState.backingUp;
-      _totalFiles = _filesToBackup.length;
-      _totalBytes = _filesToBackup.fold(0, (sum, f) => sum + f.sizeBytes);
+      _totalFiles = transferFiles.length;
+      _totalBytes = transferFiles.fold(0, (s, f) => s + f.fileSize);
       _currentIndex = 0;
       _bytesTransferred = 0;
     });
 
     final startedAt = DateTime.now();
+    String? sessionId;
+    final errors = <String>[];
 
     try {
-      // Start the local file server
-      await _fileServer.start(_filesToBackup);
+      // 1. Prepare — send file list, get session + tokens
+      final tokens = await client.prepareUpload(
+        deviceAlias: Platform.localHostname,
+        files: transferFiles,
+      );
+      sessionId = tokens['__sessionId__']!;
 
-      final localIp = await LcloudDiscovery.getLocalIP();
-      if (localIp == null) throw Exception('Could not determine local IP address.');
-
-      // Announce to PC
-      final announceUrl = 'http://$_pcAddress:$_pcPort/announce';
-      final payload = {
-        'server_port': LcloudHttpServer.defaultPort,
-        'device_ip': localIp,
-        'files': _filesToBackup.map((f) => f.toJson()).toList(),
-      };
-
-      final response = await http
-          .post(
-            Uri.parse(announceUrl),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(payload),
-          )
-          .timeout(const Duration(seconds: 15));
-
-      if (response.statusCode == 507) {
-        final body = jsonDecode(response.body) as Map<String, dynamic>;
-        final freeMb = ((body['free_bytes'] as int? ?? 0) / (1024 * 1024)).round();
-        final needMb = ((body['needed_bytes'] as int? ?? 0) / (1024 * 1024)).round();
-        throw Exception(
-          'PC storage is full.\nFree: ${freeMb} MB  ·  Needed: ${needMb} MB\n'
-          'Free up space on your PC and try again.',
-        );
-      }
-      if (response.statusCode == 503) {
-        throw Exception('PC has no backup folder set.\nOpen Lcloud on your PC and choose a backup folder.');
-      }
-      if (response.statusCode != 200) {
-        throw Exception('PC rejected backup (${response.statusCode}): ${response.body}');
-      }
-
-      // PC is now downloading files from our server
-      // Poll progress by watching bytesServed
-      int filesConfirmed = 0;
-      while (_fileServer.isRunning && filesConfirmed < _filesToBackup.length) {
-        await Future<void>.delayed(const Duration(milliseconds: 500));
-        final served = _fileServer.bytesServed;
-        // Estimate files transferred by bytes
-        filesConfirmed = (_totalBytes > 0)
-            ? ((served / _totalBytes) * _filesToBackup.length).round()
-            : 0;
-
-        final currentFileIndex = filesConfirmed.clamp(0, _filesToBackup.length);
-        final currentFileName = currentFileIndex < _filesToBackup.length
-            ? _filesToBackup[currentFileIndex].name
-            : 'Finishing...';
+      // 2. Upload each file in priority order
+      for (int i = 0; i < transferFiles.length; i++) {
+        final file = transferFiles[i];
+        final token = tokens[file.fileId];
+        if (token == null) {
+          errors.add(file.fileName);
+          continue;
+        }
 
         if (mounted) {
           setState(() {
-            _currentIndex = currentFileIndex;
-            _currentFile = currentFileName;
-            _bytesTransferred = served;
+            _currentFile = file.fileName;
+            _currentIndex = i + 1;
           });
         }
 
-        if (served >= _totalBytes) break;
-      }
+        try {
+          // Track bytes from previous files + live progress of current file
+          final prevBytes =
+              transferFiles.take(i).fold(0, (s, f) => s + f.fileSize);
 
-      await _fileServer.stop();
+          await client.uploadFile(
+            sessionId: sessionId,
+            file: file,
+            token: token,
+            onProgress: (bytesSent) {
+              if (mounted) {
+                setState(() => _bytesTransferred = prevBytes + bytesSent);
+              }
+            },
+          );
+        } on TransferException catch (e) {
+          errors.add(file.fileName);
+          if (e.code == 'invalid_token') break; // session broken — stop
+        }
+      }
 
       final session = BackupSession(
         startedAt: startedAt,
         completedAt: DateTime.now(),
-        filesSaved: _filesToBackup.length,
-        bytesTransferred: _fileServer.bytesServed,
-        errors: [],
+        filesSaved: transferFiles.length - errors.length,
+        bytesTransferred: _bytesTransferred,
+        errors: errors,
       );
 
       if (mounted) {
@@ -215,8 +202,17 @@ class _HomeScreenState extends State<HomeScreen> {
         });
         _showDeletePrompt(session);
       }
+    } on TransferException catch (e) {
+      if (sessionId != null) await client.cancel(sessionId);
+      if (mounted) {
+        setState(() {
+          _connectionState = sc.ConnectionState.error;
+          _backingUp = false;
+        });
+        _showSnack(_friendlyError(e));
+      }
     } catch (e) {
-      await _fileServer.stop();
+      if (sessionId != null) await client.cancel(sessionId);
       if (mounted) {
         setState(() {
           _connectionState = sc.ConnectionState.error;
@@ -227,29 +223,68 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  String _friendlyError(TransferException e) {
+    switch (e.code) {
+      case 'disk_full':
+        return 'PC storage is full. Free up space and try again.';
+      case 'no_backup_folder':
+        return 'Open Lcloud on your PC and set a backup folder.';
+      case 'invalid_token':
+        return 'Connection error. Please try again.';
+      default:
+        return 'Backup failed (${e.code}). Please try again.';
+    }
+  }
+
+  String _mimeType(String fileName) {
+    final ext = fileName.split('.').last.toLowerCase();
+    const types = {
+      'jpg': 'image/jpeg',
+      'jpeg': 'image/jpeg',
+      'png': 'image/png',
+      'gif': 'image/gif',
+      'heic': 'image/heic',
+      'webp': 'image/webp',
+      'mp4': 'video/mp4',
+      'mov': 'video/quicktime',
+      'avi': 'video/x-msvideo',
+      'mkv': 'video/x-matroska',
+      '3gp': 'video/3gpp',
+      'pdf': 'application/pdf',
+      'doc': 'application/msword',
+      'docx':
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    };
+    return types[ext] ?? 'application/octet-stream';
+  }
+
   void _showDeletePrompt(BackupSession session) {
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: _cardColor,
-        title: const Text('Backup Complete', style: TextStyle(color: Colors.white)),
+        title: const Text('Backup Complete',
+            style: TextStyle(color: Colors.white)),
         content: Text(
-          '${session.filesSaved} files (${session.sizeLabel}) backed up successfully.\n\n'
-          'Do you want to delete the backed-up files from your phone to free space?',
+          '${session.filesSaved} files (${session.sizeLabel}) backed up.\n\n'
+          'Delete backed-up files from your phone to free space?',
           style: const TextStyle(color: _textSecondary),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Keep on Phone', style: TextStyle(color: _textSecondary)),
+            child: const Text('Keep on Phone',
+                style: TextStyle(color: _textSecondary)),
           ),
           ElevatedButton(
             onPressed: () {
               Navigator.of(ctx).pop();
               _showSnack('Delete feature coming in v0.3');
             },
-            style: ElevatedButton.styleFrom(backgroundColor: _accentColor),
-            child: const Text('Delete from Phone', style: TextStyle(color: Colors.white)),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: _accentColor),
+            child: const Text('Delete from Phone',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -267,7 +302,8 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text(
           'Lcloud',
-          style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+          style: TextStyle(
+              color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
         ),
         backgroundColor: _bgColor,
         elevation: 0,
@@ -276,28 +312,33 @@ class _HomeScreenState extends State<HomeScreen> {
             icon: const Icon(Icons.settings, color: Colors.white),
             onPressed: () => Navigator.push(
               context,
-              MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
+              MaterialPageRoute<void>(
+                  builder: (_) => const SettingsScreen()),
             ),
           ),
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _backingUp ? null : _startDiscovery,
+            onPressed: _backingUp
+                ? null
+                : () {
+                    _discovery.stopDiscovery();
+                    setState(() {
+                      _connectionState = sc.ConnectionState.searching;
+                      _pc = null;
+                    });
+                    _startDiscovery();
+                  },
           ),
         ],
       ),
       body: Column(
         children: [
-          // Status
           sc.StatusCard(
             state: _connectionState,
-            pcName: _pcName,
-            subtitle: _pcAddress != null ? 'IP: $_pcAddress' : null,
+            pcName: _pc?.name,
+            subtitle: null, // no raw IP shown to user
           ),
-
-          // Stats row
           _statsRow(),
-
-          // Progress (only during backup)
           if (_backingUp)
             ProgressCard(
               currentFile: _currentFile,
@@ -306,17 +347,14 @@ class _HomeScreenState extends State<HomeScreen> {
               bytesTransferred: _bytesTransferred,
               totalBytes: _totalBytes,
             ),
-
-          // Backup Now button
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: SizedBox(
               width: double.infinity,
               height: 52,
               child: ElevatedButton(
-                onPressed: (_backingUp || _connectionState == sc.ConnectionState.searching)
-                    ? null
-                    : _startBackup,
+                onPressed: (_backingUp || _pc == null) ? null : _startBackup,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _accentColor,
                   disabledBackgroundColor: Colors.white10,
@@ -326,13 +364,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Text(
                   _backingUp ? 'Backing up...' : 'Backup Now',
                   style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white),
                 ),
               ),
             ),
           ),
-
-          // History
           Expanded(child: _historyList()),
         ],
       ),
@@ -340,7 +378,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _statsRow() {
-    final totalSize = _filesToBackup.fold<int>(0, (s, f) => s + f.sizeBytes);
+    final totalSize =
+        _filesToBackup.fold<int>(0, (s, f) => s + f.sizeBytes);
     final sizeMb = totalSize / (1024 * 1024);
     final lastBackup = _sessions.isNotEmpty
         ? DateFormat('MMM d').format(_sessions.first.completedAt)
@@ -348,7 +387,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+      padding:
+          const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
       decoration: BoxDecoration(
         color: _cardColor,
         borderRadius: BorderRadius.circular(14),
@@ -357,14 +397,11 @@ class _HomeScreenState extends State<HomeScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _statItem(
-            _scanning ? '...' : '${_filesToBackup.length}',
-            'Files found',
-          ),
+              _scanning ? '...' : '${_filesToBackup.length}', 'Files found'),
           _divider(),
           _statItem(
-            _scanning ? '...' : '${sizeMb.toStringAsFixed(1)} MB',
-            'Total size',
-          ),
+              _scanning ? '...' : '${sizeMb.toStringAsFixed(1)} MB',
+              'Total size'),
           _divider(),
           _statItem(lastBackup, 'Last backup'),
         ],
@@ -372,24 +409,22 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _statItem(String value, String label) {
-    return Column(
-      children: [
-        Text(value,
-            style: const TextStyle(
-                color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
-        const SizedBox(height: 2),
-        Text(label,
-            style: const TextStyle(color: _textSecondary, fontSize: 11)),
-      ],
-    );
-  }
-
-  Widget _divider() => Container(
-        height: 30,
-        width: 1,
-        color: Colors.white12,
+  Widget _statItem(String value, String label) => Column(
+        children: [
+          Text(value,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700)),
+          const SizedBox(height: 2),
+          Text(label,
+              style:
+                  const TextStyle(color: _textSecondary, fontSize: 11)),
+        ],
       );
+
+  Widget _divider() =>
+      Container(height: 30, width: 1, color: Colors.white12);
 
   Widget _historyList() {
     if (_sessions.isEmpty) {
@@ -397,11 +432,11 @@ class _HomeScreenState extends State<HomeScreen> {
         child: Text(
           'No backups yet.\nTap "Backup Now" to start.',
           textAlign: TextAlign.center,
-          style: TextStyle(color: _textSecondary, fontSize: 14, height: 1.6),
+          style: TextStyle(
+              color: _textSecondary, fontSize: 14, height: 1.6),
         ),
       );
     }
-
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       itemCount: _sessions.length + 1,
@@ -418,8 +453,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           );
         }
-        final session = _sessions[idx - 1];
-        return _sessionTile(session);
+        return _sessionTile(_sessions[idx - 1]);
       },
     );
   }
@@ -430,22 +464,23 @@ class _HomeScreenState extends State<HomeScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: _cardColor,
-        borderRadius: BorderRadius.circular(12),
-      ),
+          color: _cardColor, borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
-          const Icon(Icons.check_circle, color: Color(0xFF22c55e), size: 20),
+          const Icon(Icons.check_circle,
+              color: Color(0xFF22c55e), size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(date,
-                    style: const TextStyle(color: Colors.white, fontSize: 13)),
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 13)),
                 Text(
                   '${session.filesSaved} files · ${session.sizeLabel}',
-                  style: const TextStyle(color: _textSecondary, fontSize: 12),
+                  style: const TextStyle(
+                      color: _textSecondary, fontSize: 12),
                 ),
               ],
             ),
@@ -453,7 +488,8 @@ class _HomeScreenState extends State<HomeScreen> {
           if (session.hadErrors)
             Text(
               '${session.errors.length} error',
-              style: const TextStyle(color: Color(0xFFf59e0b), fontSize: 11),
+              style: const TextStyle(
+                  color: Color(0xFFf59e0b), fontSize: 11),
             ),
         ],
       ),
@@ -462,12 +498,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _showSnack(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: _cardColor,
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      backgroundColor: _cardColor,
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 }

@@ -1,40 +1,185 @@
-# Lcloud — Claude Project File
-
-> **How to use this file:** Update the `## Current Tasks` section to tell Claude what to work on next.
-> When resuming a session just say "resume the project" — Claude will read this file first.
+# Lcloud — Claude Development Guide
+> **How to resume work:** Read this file top to bottom first, then read the relevant spec/plan from `docs/superpowers/`. You will have full context within 3 minutes.
 
 ---
 
-## Current Tasks
+## Who Is Building This
 
-<!-- ADD / EDIT TASKS HERE — Claude reads this at the start of every session -->
+**User:** Shangeeth (shangeeth2k@gmail.com) — non-technical user. He has an Android phone and a Windows PC. He wants an open-source WiFi backup app that he can eventually release publicly. He does not write code — Claude Code builds everything.
 
-### v0.1 — Done ✅
-- [x] PC app complete and working (run with lcloud-pc/run.bat)
-- [x] Android APK built (lcloud-android.apk at project root — rebuild with build-android.bat)
-- [x] Disk space check — PC warns and rejects backup if not enough space (Q14)
-- [x] Settings panel on PC — gear button to configure port (Q23)
-- [x] Clear error messages for disk full, no folder set
-
-### v0.2 — Next
-- [ ] Implement smart priority engine (WhatsApp → Photos → Videos → Docs)
-- [ ] Implement storage threshold trigger (phone below 15% free → auto-backup)
-- [ ] Add "Delete after backup?" — actually execute the delete (currently shows "coming in v0.3")
-- [ ] Progress bar with speed + ETA on both sides
+**Working style:**
+- Give terse responses — user can read the diff
+- Never add features or refactors beyond what was asked
+- Superpowers skills are active: always invoke the relevant skill before acting
+- TDD: write failing test first, then implement, then commit
 
 ---
 
-## Project Overview
+## What Lcloud Is
 
-**Lcloud** = automatic WiFi backup from Android phone to Windows PC.
-No cloud, no internet, no account. Files stay local.
+Automatic WiFi backup from Android phone to Windows PC. No cloud, no internet, no account. Files stay local. Two killer features no competitor has:
 
-**Two killer features** (not in any competitor):
-1. **Priority engine** — WhatsApp first, then newest photos, then videos, then docs
+1. **Smart priority engine** — WhatsApp first, then newest photos, then videos, then docs
 2. **Storage threshold trigger** — phone hits 15% free → backup starts automatically
 
-**Current version:** v0.1.0 — full prototype working. Manual backup only.
-**Next milestone:** v0.2.0 — priority engine + auto-trigger.
+**Target user:** Android + Windows, non-technical, wants something that "just works for free."
+
+---
+
+## Current Version Status
+
+| Version | Status | What it is |
+|---------|--------|------------|
+| v0.1 | ✅ Done | Working prototype — manual backup, file organization |
+| v0.2 | ✅ Done | LocalSend-inspired transport (HTTPS push, cert trust, multicast discovery) |
+| v0.3 | 🔨 In Progress | Restore feature (manifests + 3 endpoints + RestoreScreen) |
+| v0.4 | Planned | AES-256-GCM at-rest encryption |
+| v0.5 | Planned | Open source release, Windows auto-start service |
+
+**Important:** v0.2 is the transport rewrite, NOT the priority engine or storage trigger. Those are still unbuilt. The mDNS + HTTP pull architecture from v0.1 was broken and replaced with a proven LocalSend-inspired pattern.
+
+---
+
+## Architecture — CURRENT (v0.2 LocalSend-Inspired)
+
+```
+Android (Flutter/Dart)               Windows PC (Python 3.12)
+──────────────────────               ────────────────────────
+LcloudDiscovery                      LcloudDiscovery
+  └─ UDP multicast listen        ←    └─ broadcasts every 2s to 224.0.0.167:53317
+  └─ parses JSON beacon               └─ {alias, fingerprint, port, protocol:"https"}
+
+TransferClient                       BackupEngine (HTTPS server, port 53317)
+  └─ verifies cert by SHA-256    →    └─ GET  /api/lcloud/v2/info
+     fingerprint (TOFU)               └─ POST /api/lcloud/v2/prepare-upload
+  └─ POST prepare-upload              └─ POST /api/lcloud/v2/upload  (streamed)
+  └─ streams files via openRead()     └─ POST /api/lcloud/v2/cancel
+  └─ GET /restore/* endpoints    ←    └─ GET  /api/lcloud/v2/restore/sessions  (v0.3)
+                                       └─ GET  /api/lcloud/v2/restore/files     (v0.3)
+                                       └─ GET  /api/lcloud/v2/restore/file      (v0.3)
+```
+
+**Protocol:**
+- Discovery: UDP multicast to `224.0.0.167:53317` every 2s
+- Transfer: HTTPS on port `53317` (same port as LocalSend)
+- TLS: self-signed RSA-2048 cert, SHA-256 fingerprint trust (TOFU)
+- Streaming: phone pushes files in 65536-byte chunks via `File.openRead()`
+- Android multicast requires a platform channel lock: `com.lcloud.lcloud/multicast`
+
+---
+
+## File Map (Complete)
+
+```
+lcloud/
+├── CLAUDE.md                    ← THIS FILE — read first when resuming
+├── README.md
+├── ROADMAP.md
+├── CHANGELOG.md
+├── .gitignore
+├── build-android.bat            ← builds lcloud-android.apk
+├── build-pc.bat                 ← builds Lcloud.exe via PyInstaller
+├── install-android.bat          ← installs APK to connected phone via adb
+│
+├── docs/
+│   ├── USER_GUIDE.md
+│   ├── DEV_GUIDE.md
+│   ├── DESIGN_ISSUES.md         ← 13 known design issues with severity
+│   ├── research/                ← market research and competitor analysis
+│   │   ├── market-analysis.md
+│   │   ├── competitor-comparison.md
+│   │   └── original-project-context.md
+│   ├── specs/
+│   │   └── lcloud-design.md     ← original design spec (historical)
+│   └── superpowers/
+│       ├── specs/
+│       │   ├── 2026-04-22-localsend-inspired-transport-design.md
+│       │   └── 2026-04-22-restore-feature-design.md  ← APPROVED SPEC
+│       └── plans/
+│           ├── 2026-04-22-localsend-transport.md     ← DONE
+│           └── 2026-04-22-restore-feature.md         ← IN PROGRESS (Task 1/9)
+│
+├── lcloud-pc/
+│   ├── src/
+│   │   ├── main.py              ← entry point: loads cert, starts discovery + server
+│   │   ├── config.py            ← ALL constants (port 53317, multicast, cert paths)
+│   │   └── core/
+│   │       ├── backup_engine.py ← HTTPS server, session mgmt, file streaming
+│   │       ├── file_organizer.py← sorts files into Photos/Videos/WhatsApp/Docs/Other
+│   │       ├── discovery.py     ← UDP multicast broadcast (sends beacon every 2s)
+│   │       ├── certs.py         ← RSA-2048 self-signed cert generation + fingerprint
+│   │       └── restore_handler.py ← (v0.3, NOT YET CREATED)
+│   ├── tests/
+│   │   ├── test_backup_engine.py← 8 tests: info, prepare, upload, cancel
+│   │   ├── test_certs.py        ← 6 tests: cert generation, fingerprint
+│   │   └── test_file_organizer.py
+│   ├── requirements.txt         ← cryptography>=42.0.0 (no more zeroconf/requests)
+│   ├── Lcloud.spec              ← PyInstaller spec
+│   ├── setup.bat
+│   └── run.bat
+│
+└── lcloud-android/
+    ├── lib/
+    │   ├── main.dart
+    │   ├── models/
+    │   │   ├── backup_file.dart
+    │   │   ├── backup_session.dart
+    │   │   └── restore_session.dart  ← (v0.3, NOT YET CREATED)
+    │   ├── services/
+    │   │   ├── discovery.dart        ← UDP multicast listen + DiscoveredPC model
+    │   │   ├── file_scanner.dart
+    │   │   ├── transfer_client.dart  ← HTTPS push client (prepareUpload/uploadFile/cancel)
+    │   │   └── restore_client.dart   ← (v0.3, NOT YET CREATED)
+    │   ├── screens/
+    │   │   ├── home_screen.dart      ← Backup Now button, discovery, progress
+    │   │   ├── settings_screen.dart
+    │   │   └── restore_screen.dart   ← (v0.3, NOT YET CREATED)
+    │   └── widgets/
+    │       ├── progress_card.dart
+    │       └── status_card.dart
+    ├── android/app/src/main/kotlin/com/lcloud/lcloud/MainActivity.kt
+    │   └─ multicast lock platform channel (com.lcloud.lcloud/multicast)
+    ├── pubspec.yaml             ← flutter, permission_handler, crypto, intl, http
+    └── test/
+        ├── widget_test.dart
+        ├── services/transfer_client_test.dart
+        └── models/restore_session_test.dart  ← (v0.3, NOT YET CREATED)
+```
+
+---
+
+## v0.3 Restore Feature — Current In-Progress Work
+
+**Status:** Plan written, implementation NOT started. Tasks 1–9 are all pending.
+
+**Spec:** `docs/superpowers/specs/2026-04-22-restore-feature-design.md`
+**Plan:** `docs/superpowers/plans/2026-04-22-restore-feature.md`
+
+### How Restore Works
+
+After every completed backup, PC writes a manifest:
+```
+{backup_root}/.lcloud/manifests/{session_id}.json
+```
+Records each file's `originalPath` (full phone path) and `backedUpPath` (relative to backup_root).
+
+Three new GET endpoints serve restore data. Android gets a new RestoreScreen with category tabs, expandable session rows, file checkboxes, and a restore loop that skips existing files and handles missing folders.
+
+### Task Status
+
+| # | Task | Status |
+|---|------|--------|
+| 1 | PC: Add `MANIFEST_SUBDIR` to config.py | ⏳ Pending |
+| 2 | PC: RestoreHandler class (TDD) | ⏳ Pending |
+| 3 | PC: Manifest writing in backup_engine.py | ⏳ Pending |
+| 4 | PC: Wire restore endpoints into HTTPS server | ⏳ Pending |
+| 5 | Android: restore_session.dart data classes + tests | ⏳ Pending |
+| 6 | Android: restore_client.dart HTTPS client | ⏳ Pending |
+| 7 | Android: restore_screen.dart full UI | ⏳ Pending |
+| 8 | Android: Add Restore button to home_screen.dart | ⏳ Pending |
+| 9 | Rebuild Lcloud.exe and lcloud-android.apk | ⏳ Pending |
+
+**To resume restore work:** Say "resume the restore feature" — then invoke `superpowers:subagent-driven-development` and start from Task 1 using the plan at `docs/superpowers/plans/2026-04-22-restore-feature.md`.
 
 ---
 
@@ -43,170 +188,95 @@ No cloud, no internet, no account. Files stay local.
 | Tool | Location | Notes |
 |------|----------|-------|
 | Flutter 3.41.6 | `H:\fun\tools\flutter\bin` | Add to PATH or use full path |
-| JDK 17 (Microsoft) | `H:\fun\tools\jdk-17.0.18+8` | Flutter configured to use this via `flutter config --jdk-dir` |
-| Android SDK | `C:\Users\{user}\AppData\Local\Android\Sdk` | Already set up |
-| Python 3.12 | System PATH | Used for PC app |
+| JDK 17 (Microsoft) | `H:\fun\tools\jdk-17.0.18+8` | Flutter configured via `flutter config --jdk-dir` |
+| Android SDK | `C:\Users\{user}\AppData\Local\Android\Sdk` |
+| Python 3.12 | System PATH |
 
----
+### How to Run
 
-## How to Run
-
-### PC App
+**PC App:**
 ```bat
 cd lcloud-pc
 setup.bat          # first time only — creates venv, installs deps
 run.bat            # start the app
 ```
 
-### Android App
+**Android App:**
 ```bat
-tools\install_flutter.bat    # first time only
 cd lcloud-android
-flutter run                  # build + deploy to connected device
+flutter run        # build + deploy to connected phone
 ```
 
-### Tests
+**Tests:**
 ```bat
-cd lcloud-pc
-call venv\Scripts\activate
-pytest tests\ -v
+cd lcloud-pc && call venv\Scripts\activate && pytest tests\ -v
+cd lcloud-android && flutter test
+```
+
+**Rebuild binaries:**
+```bat
+build-pc.bat       # → H:\fun\lcloud\Lcloud.exe
+build-android.bat  # → H:\fun\lcloud\lcloud-android.apk
 ```
 
 ---
 
-## Architecture
+## Superpowers — Active Rules
 
-```
-Android (Flutter/Dart)               Windows PC (Python 3.12)
-──────────────────────               ────────────────────────
-FileScanner                          BackupEngine
-  └─ scans storage by priority   →     └─ HTTP server on port 52000
-  └─ builds ordered file list          └─ receives file list (POST /announce)
-                                        └─ downloads each file (GET /file/...)
-LcloudHttpServer (port 52001)        FileOrganizer
-  └─ serves files as byte streams  →    └─ sorts into Photos/Videos/WhatsApp/Docs
-                                        └─ creates year/month subfolders
-LcloudDiscovery                      LcloudDiscovery
-  └─ mDNS advertise + find PC    ↔    └─ mDNS register + find phone
-```
+This project uses the `superpowers` plugin system. **Rules:**
 
-**Ports:** PC listens on `52000`, Phone serves on `52001`
-**mDNS service name:** `_lcloud._tcp.local.`
-**Settings stored:** `%LOCALAPPDATA%\lcloud\settings.json`
-**Log file:** `%LOCALAPPDATA%\lcloud\lcloud.log`
+1. **Always invoke the relevant skill before acting.** Even a 1% chance a skill applies means invoke it.
+2. **Before any new feature:** `superpowers:brainstorming` → design doc first, then plan, then implementation
+3. **Implementation:** `superpowers:subagent-driven-development` (user's confirmed preferred approach)
+4. **TDD is mandatory:** Write failing test → implement → test passes → commit
+5. **After a major step:** `superpowers:code-reviewer`
+6. **Commit frequently:** After every task completes, not at the end
 
 ---
 
-## File Map
+## Coding Conventions
 
-```
-lcloud/
-├── CLAUDE.md              ← YOU ARE HERE — tasks + project context
-├── README.md              ← public-facing overview
-├── ROADMAP.md             ← version plan (v0.1 → v0.5+)
-├── CHANGELOG.md           ← what shipped in each version
-├── .gitignore
-│
-├── docs/
-│   ├── USER_GUIDE.md      ← setup + usage instructions for end users
-│   ├── DEV_GUIDE.md       ← architecture, dev setup, known gaps
-│   └── specs/
-│       └── lcloud-design.md  ← full design spec (answered Q1-16)
-│
-├── lcloud-pc/             ← Windows app (Python)
-│   ├── src/
-│   │   ├── main.py        ← entry point, wires everything together
-│   │   ├── config.py      ← ALL constants + Settings class (single source of truth)
-│   │   ├── core/
-│   │   │   ├── backup_engine.py   ← HTTP server, orchestrates downloads
-│   │   │   ├── file_organizer.py  ← sorts files into folders by type + date
-│   │   │   └── discovery.py       ← mDNS: registers PC, finds phone
-│   │   └── ui/
-│   │       ├── main_window.py     ← CustomTkinter window
-│   │       └── tray.py            ← system tray icon + menu
-│   ├── tests/
-│   │   ├── test_backup_engine.py
-│   │   └── test_file_organizer.py
-│   ├── requirements.txt
-│   ├── setup.bat          ← creates venv + installs requirements
-│   └── run.bat            ← activates venv + starts app
-│
-├── lcloud-android/        ← Android app (Flutter/Dart)
-│   ├── lib/
-│   │   ├── main.dart      ← entry point, permissions, MaterialApp
-│   │   ├── models/
-│   │   │   ├── backup_file.dart     ← data class for a file to transfer
-│   │   │   └── backup_session.dart  ← data class for a completed session
-│   │   ├── services/
-│   │   │   ├── file_scanner.dart    ← scans storage, returns priority-ordered list
-│   │   │   ├── http_server.dart     ← serves files to PC (shelf package)
-│   │   │   └── discovery.dart       ← mDNS advertise + PC discovery
-│   │   ├── screens/
-│   │   │   ├── home_screen.dart     ← main UI + "Backup Now" button
-│   │   │   └── settings_screen.dart ← settings (threshold, etc.)
-│   │   └── widgets/
-│   │       ├── status_card.dart     ← PC connection status
-│   │       └── progress_card.dart   ← transfer progress display
-│   ├── android/app/src/main/AndroidManifest.xml
-│   ├── pubspec.yaml
-│   └── analysis_options.yaml
-│
-└── tools/
-    └── install_flutter.bat   ← one-time Flutter SDK setup for Windows
-```
+### Python (PC)
+- All constants in `config.py` — no magic strings elsewhere
+- All public methods typed, no `type: ignore`
+- `logging` not `print`
+- Tests: `pytest tests\ -v` — all must pass before commit
+
+### Dart (Android)
+- Follow `analysis_options.yaml` — `flutter analyze` before commit
+- `final` everywhere possible
+- Tests: `flutter test` — all must pass before commit
+
+### Commits
+`feat(scope): description` / `fix: description` / `chore: description`
+
+### Never commit
+`venv/`, `__pycache__/`, `*.log`, `Lcloud.exe`, `*.apk`, TLS certs (they live in `%LOCALAPPDATA%\lcloud\` at runtime)
 
 ---
 
-## Key Design Decisions
+## Key Design Decisions (Locked In)
 
-| Decision | Rationale |
-|----------|-----------|
-| HTTP over local WiFi | Simple, no NAT issues, works on every router |
-| mDNS for discovery | Zero-config — no IP typing, no pairing |
-| Python + CustomTkinter | Fast to build, runs on any Windows without install |
-| Flutter for Android | Cross-platform future (iOS later), good HTTP/mDNS packages |
-| All config in `config.py` | Single source of truth — no magic strings elsewhere |
-| Background thread for backup | UI never freezes; all UI updates via `window.after()` |
-| `%LOCALAPPDATA%` for data | Correct Windows path for per-user app data |
-
----
-
-## v0.2 Implementation Notes
-
-When building v0.2, key files to touch:
-
-**Priority engine:**
-- `lcloud-android/lib/services/file_scanner.dart` — change sort order
-- `lcloud-pc/src/core/backup_engine.py` — respect the order from the phone's file list
-
-**Storage threshold trigger:**
-- `lcloud-android/lib/services/file_scanner.dart` — add storage check method
-- `lcloud-android/lib/screens/home_screen.dart` — add background polling / trigger logic
-- `lcloud-android/lib/screens/settings_screen.dart` — add threshold slider (default 15%)
-
-**Progress bar with ETA:**
-- `lcloud-pc/src/core/backup_engine.py` — emit progress callbacks with bytes/sec
-- `lcloud-pc/src/ui/main_window.py` — wire progress to CTkProgressBar
-- `lcloud-android/lib/widgets/progress_card.dart` — show speed + ETA on phone
+| Decision | Why |
+|----------|-----|
+| LocalSend transport (multicast UDP + HTTPS push) | mDNS was broken by Windows Firewall; proven pattern |
+| Port 53317 | Known-open on most home routers (same as LocalSend) |
+| Self-signed cert + SHA-256 fingerprint TOFU | No CA needed, zero config for user |
+| Push model (phone → PC) | Real progress tracking, simpler phone side |
+| Manifest for restore: per-session JSON, relative paths | Decoupled from backup; survives folder moves |
+| No account ever | Core trust signal; shapes entire architecture |
+| Python + CustomTkinter | Fast to build, readable for contributors |
+| Flutter/Dart | Cross-platform (iOS later without rewrite) |
 
 ---
 
-## Version Status
+## What Is NOT Built Yet
 
-| Version | Status | Focus |
-|---------|--------|-------|
-| v0.1 | ✅ Done | Working prototype — manual backup, file org, WiFi transfer |
-| v0.2 | 🔨 Next | Priority engine + storage threshold trigger |
-| v0.3 | Planned | Duplicate detection, resume, reliability |
-| v0.4 | Planned | Encryption (AES-256-GCM + TLS) |
-| v0.5 | Planned | Open source release, Windows service, APK |
-
----
-
-## Conventions
-
-- **Python style:** no type: ignore, all public methods typed, logging not print
-- **Dart style:** follow `analysis_options.yaml`, prefer `final` everywhere
-- **Tests:** write tests for all core logic (`lcloud-pc/tests/`)
-- **Commits:** `feat(vX.Y): description` / `fix: description` / `chore: description`
-- **Never commit:** `venv/`, `__pycache__/`, `*.log`, build artifacts
+- Priority engine (WhatsApp → Photos → Videos → Docs)
+- Storage threshold trigger (15% free → auto-backup)
+- "Delete after backup" actual file deletion (stub dialog exists)
+- Duplicate detection (SHA-256)
+- Resume interrupted backups
+- AES-256 at-rest encryption
+- Windows background service / auto-start
+- Open source release

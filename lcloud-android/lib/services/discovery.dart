@@ -1,101 +1,113 @@
+/// Lcloud Android — Device Discovery (Multicast UDP)
+///
+/// Listens for the PC's multicast broadcast on 224.0.0.167:53317.
+/// Uses the native platform channel (MainActivity.kt) to acquire a
+/// WifiManager.MulticastLock before joining the multicast group — required
+/// on Android to receive multicast packets from the WiFi chip.
+library;
+
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
-import 'package:multicast_dns/multicast_dns.dart';
 
-const String _serviceType = '_lcloud._tcp';
-const String _androidServiceName = 'lcloud-android';
-const int _androidPort = 52001;
-const Duration _discoveryTimeout = Duration(seconds: 10);
+import 'package:flutter/services.dart';
 
-/// Information about a discovered PC running Lcloud.
+const String _multicastGroup = '224.0.0.167';
+const int _multicastPort = 53317;
+const _channel = MethodChannel('com.lcloud.lcloud/multicast');
+
+/// A PC running Lcloud that is broadcasting its presence.
 class DiscoveredPC {
   const DiscoveredPC({
     required this.name,
     required this.address,
     required this.port,
+    required this.fingerprint,
   });
 
   final String name;
   final String address;
   final int port;
+  final String fingerprint;
 
   @override
   String toString() => 'DiscoveredPC($name @ $address:$port)';
 }
 
-/// Handles mDNS service advertisement and PC discovery.
+/// Listens for PC broadcasts on the local multicast group.
 ///
-/// - [advertise] announces this Android device on the local network
-/// - [findPC] searches for a PC running Lcloud
+/// Usage:
+///   final discovery = LcloudDiscovery();
+///   discovery.startListening(onFound: (pc) { ... });
+///   // later:
+///   discovery.stopDiscovery();
 class LcloudDiscovery {
-  MDnsClient? _client;
+  RawDatagramSocket? _socket;
+  bool _running = false;
 
-  /// Advertise this Android device as an Lcloud node on the local network.
+  /// Start listening for PC broadcasts.
   ///
-  /// Note: The multicast_dns package handles PTR/SRV/A record registration.
-  /// On Android, CHANGE_WIFI_MULTICAST_STATE permission is required.
-  Future<void> advertise({int port = _androidPort}) async {
-    // multicast_dns package does not support full service registration in current
-    // Dart implementation — advertisement is handled by the shelf server responding
-    // to /ping. PC discovers via scanning or manual IP for v0.1.
-    // Full mDNS advertisement is planned for v0.2 using a native plugin.
-    // For now, the phone's IP is shown in the UI for manual connection if needed.
-  }
+  /// [onFound] fires each time a valid broadcast is parsed — it may fire
+  /// multiple times for the same PC (once per 2-second interval).
+  /// Deduplicate by [DiscoveredPC.address] in the caller if needed.
+  Future<void> startListening({
+    required void Function(DiscoveredPC pc) onFound,
+  }) async {
+    _running = true;
 
-  /// Scan the local network for a PC running Lcloud.
-  ///
-  /// Returns the first discovered [DiscoveredPC] within [_discoveryTimeout],
-  /// or null if none is found.
-  Future<DiscoveredPC?> findPC() async {
-    final client = MDnsClient();
-    _client = client;
+    // Acquire WiFi multicast lock — required on Android to receive multicast.
+    // On error (e.g. emulator), we continue without it — best effort.
+    try {
+      await _channel.invokeMethod<void>('acquireLock');
+    } catch (_) {}
 
     try {
-      await client.start();
+      _socket = await RawDatagramSocket.bind(
+        InternetAddress.anyIPv4,
+        _multicastPort,
+        reuseAddress: true,
+      );
+      _socket!.joinMulticast(InternetAddress(_multicastGroup));
 
-      await for (final PtrResourceRecord ptr in client
-          .lookup<PtrResourceRecord>(
-              ResourceRecordQuery.serverPointer(_serviceType))
-          .timeout(_discoveryTimeout, onTimeout: (_) {})) {
-        // Resolve SRV record
-        await for (final SrvResourceRecord srv in client
-            .lookup<SrvResourceRecord>(
-                ResourceRecordQuery.service(ptr.domainName))
-            .timeout(const Duration(seconds: 3), onTimeout: (_) {})) {
+      await for (final event in _socket!) {
+        if (!_running) break;
+        if (event != RawSocketEvent.read) continue;
 
-          // Resolve A (IP) record
-          await for (final IPAddressResourceRecord ip in client
-              .lookup<IPAddressResourceRecord>(
-                  ResourceRecordQuery.addressIPv4(srv.target))
-              .timeout(const Duration(seconds: 3), onTimeout: (_) {})) {
+        final datagram = _socket!.receive();
+        if (datagram == null) continue;
 
-            final name = ptr.domainName.replaceAll('.$_serviceType.local', '');
-            final pc = DiscoveredPC(
-              name: name,
-              address: ip.address.address,
-              port: srv.port,
-            );
-            client.stop();
-            return pc;
-          }
+        try {
+          final text = utf8.decode(datagram.data);
+          final map = jsonDecode(text) as Map<String, dynamic>;
+
+          if (map['protocol'] != 'https') continue;
+
+          final pc = DiscoveredPC(
+            name: (map['alias'] as String?) ?? 'Lcloud PC',
+            address: datagram.address.address,
+            port: (map['port'] as int?) ?? _multicastPort,
+            fingerprint: (map['fingerprint'] as String?) ?? '',
+          );
+          onFound(pc);
+        } catch (_) {
+          // Malformed packet — ignore silently
         }
       }
-    } on Exception {
-      // Discovery timed out or failed — not an error
     } finally {
-      client.stop();
-      _client = null;
+      try {
+        await _channel.invokeMethod<void>('releaseLock');
+      } catch (_) {}
     }
-
-    return null;
   }
 
-  /// Stop any ongoing discovery.
+  /// Stop listening and release the multicast lock.
   void stopDiscovery() {
-    _client?.stop();
-    _client = null;
+    _running = false;
+    _socket?.close();
+    _socket = null;
   }
 
-  /// Get the local WiFi IP address of this device.
+  /// Returns the device's local WiFi IP (first non-loopback IPv4 address).
   static Future<String?> getLocalIP() async {
     try {
       final interfaces = await NetworkInterface.list(
@@ -103,24 +115,11 @@ class LcloudDiscovery {
         includeLinkLocal: false,
       );
       for (final iface in interfaces) {
-        // Prefer WiFi interfaces
-        if (iface.name.toLowerCase().contains('wlan') ||
-            iface.name.toLowerCase().contains('wifi') ||
-            iface.name.toLowerCase().contains('eth')) {
-          for (final addr in iface.addresses) {
-            if (!addr.isLoopback) return addr.address;
-          }
-        }
-      }
-      // Fallback to first non-loopback IPv4
-      for (final iface in interfaces) {
         for (final addr in iface.addresses) {
           if (!addr.isLoopback) return addr.address;
         }
       }
-    } on Exception {
-      return null;
-    }
+    } catch (_) {}
     return null;
   }
 }

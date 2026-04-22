@@ -11,7 +11,12 @@ a = Analysis(
     pathex=['src'],
     binaries=[],
     datas=datas,
-    hiddenimports=['zeroconf._handlers.answers', 'zeroconf._utils.ipaddress', 'zeroconf._dns'],
+    hiddenimports=[
+        'cryptography.hazmat.primitives.asymmetric.rsa',
+        'cryptography.hazmat.primitives.hashes',
+        'cryptography.hazmat.backends.openssl',
+        'cryptography.x509',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

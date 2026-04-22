@@ -120,17 +120,17 @@ class FileOrganizer:
         Return a path that does not already exist.
         If `filename` exists, append _HHMMSS before the extension.
         """
-        stem = Path(filename).stem
-        suffix = Path(filename).suffix
-        candidate = dest_dir / filename
+        basename = Path(filename).name   # strip any leading path from phone
+        stem = Path(basename).stem
+        suffix = Path(basename).suffix
+        candidate = dest_dir / basename
 
         if not candidate.exists():
             return candidate
 
         # Collision — append timestamp
         timestamp = datetime.now().strftime("%H%M%S")
-        new_name = f"{stem}_{timestamp}{suffix}"
-        candidate = dest_dir / new_name
+        candidate = dest_dir / f"{stem}_{timestamp}{suffix}"
 
         # Extreme edge case: still collides (same second, same file)
         counter = 1
