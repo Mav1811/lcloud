@@ -81,6 +81,9 @@ lcloud/
 ├── build-pc.bat                 ← builds Lcloud.exe via PyInstaller
 ├── install-android.bat          ← installs APK to connected phone via adb
 │
+├── landing/
+│   └── index.html               ← marketing landing page (pure HTML/CSS/JS, no build tool)
+│
 ├── docs/
 │   ├── VERSIONS.md              ← universal version tracker (what's in each version)
 │   ├── FEATURES.md              ← brainstorming, backlog, competitor analysis
@@ -89,7 +92,8 @@ lcloud/
 │   └── superpowers/
 │       ├── specs/
 │       │   ├── 2026-04-22-localsend-inspired-transport-design.md
-│       │   └── 2026-04-22-restore-feature-design.md
+│       │   ├── 2026-04-22-restore-feature-design.md
+│       │   └── 2026-04-25-landing-page-design.md     ← design system + landing spec
 │       └── plans/
 │           ├── 2026-04-22-localsend-transport.md     ← DONE
 │           └── 2026-04-22-restore-feature.md         ← DONE
