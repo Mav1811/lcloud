@@ -82,22 +82,17 @@ lcloud/
 ├── install-android.bat          ← installs APK to connected phone via adb
 │
 ├── docs/
-│   ├── USER_GUIDE.md
-│   ├── DEV_GUIDE.md
-│   ├── DESIGN_ISSUES.md         ← 13 known design issues with severity
-│   ├── research/                ← market research and competitor analysis
-│   │   ├── market-analysis.md
-│   │   ├── competitor-comparison.md
-│   │   └── original-project-context.md
-│   ├── specs/
-│   │   └── lcloud-design.md     ← original design spec (historical)
+│   ├── VERSIONS.md              ← universal version tracker (what's in each version)
+│   ├── FEATURES.md              ← brainstorming, backlog, competitor analysis
+│   ├── ARCHITECTURE.md          ← all technical decisions, protocol details, tradeoffs
+│   ├── USER_GUIDE.md            ← how to install and use Lcloud
 │   └── superpowers/
 │       ├── specs/
 │       │   ├── 2026-04-22-localsend-inspired-transport-design.md
-│       │   └── 2026-04-22-restore-feature-design.md  ← APPROVED SPEC
+│       │   └── 2026-04-22-restore-feature-design.md
 │       └── plans/
 │           ├── 2026-04-22-localsend-transport.md     ← DONE
-│           └── 2026-04-22-restore-feature.md         ← IN PROGRESS (Task 1/9)
+│           └── 2026-04-22-restore-feature.md         ← DONE
 │
 ├── lcloud-pc/
 │   ├── src/

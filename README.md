@@ -10,23 +10,23 @@ No cloud. No internet. No account. Just your files, safe on your PC.
 
 - Backs up photos, videos, WhatsApp media, and documents over your home WiFi
 - Organizes everything neatly: `Photos/2026/04/`, `WhatsApp/Images/`, etc.
-- Works over home WiFi — no cables, no internet required
-- Uses HTTPS with certificate fingerprint trust — no setup for the user
+- Restores any backed-up file back to its exact original location on your phone
+- Uses HTTPS with certificate fingerprint trust — secure, zero configuration
 
 ## What Makes It Different
 
 Two features no other free backup app has:
 
-1. **Smart Priority Engine** *(coming v0.3)* — backs up WhatsApp media first, then newest photos, then videos, then documents. Not random.
-2. **Storage Threshold Trigger** *(coming v0.3)* — when your phone is below 15% free, backup starts automatically. Set it and forget it.
+1. **Smart Priority Engine** *(backlog)* — backs up WhatsApp media first, then newest photos, then videos, then documents.
+2. **Storage Threshold Trigger** *(backlog)* — when your phone drops below 15% free, backup starts automatically.
 
 ## Current Status
 
 | Version | Status | What It Has |
 |---------|--------|-------------|
-| v0.1 | ✅ Shipped | Manual backup, file organization, WiFi transfer |
-| v0.2 | ✅ Shipped | Secure HTTPS transport, cert fingerprint trust, real progress tracking |
-| v0.3 | 🔨 In Progress | File restore — browse backed-up files and restore to phone |
+| v0.1 | ✅ Done | Manual backup, file organization, WiFi transfer |
+| v0.2 | ✅ Done | Secure HTTPS transport, cert fingerprint trust, real progress |
+| v0.3 | ✅ Done | File restore — browse sessions, pick files, restore to phone |
 | v0.4 | Planned | AES-256-GCM at-rest encryption |
 | v0.5 | Planned | Open source release, Windows auto-start |
 
@@ -38,6 +38,8 @@ cd lcloud-pc
 setup.bat    # first time only
 run.bat      # start Lcloud
 ```
+
+Or just double-click **`Lcloud.exe`**.
 
 **Android:** Install `lcloud-android.apk` from the releases section, or build from source:
 ```bat
@@ -56,6 +58,9 @@ via cert fingerprint
 
 Taps "Backup Now"       ─────────►  PC receives files over HTTPS
 Files stream to PC                  Files organized into folders
+
+Taps "Restore"          ◄─────────  Manifests served via HTTPS
+Picks files to restore              Files streamed back to phone
 ```
 
 No IP typing. No pairing codes. Just open both apps and tap Backup Now.
@@ -64,14 +69,15 @@ No IP typing. No pairing codes. Just open both apps and tap Backup Now.
 
 ```
 lcloud/
-├── lcloud-pc/        Windows app (Python + CustomTkinter)
-├── lcloud-android/   Android app (Flutter/Dart)
-├── docs/             Guides, specs, research
-│   ├── USER_GUIDE.md
-│   ├── DEV_GUIDE.md
-│   └── research/     Market analysis, competitor comparison
-├── ROADMAP.md        Feature plan by version
-└── CHANGELOG.md      What changed in each version
+├── lcloud-pc/           Windows app (Python + CustomTkinter)
+├── lcloud-android/      Android app (Flutter/Dart)
+├── docs/
+│   ├── VERSIONS.md      Version tracker — what's in each version, what's planned
+│   ├── FEATURES.md      Feature brainstorming, backlog, competitor analysis
+│   ├── ARCHITECTURE.md  Technical decisions, protocol details, tradeoffs
+│   └── USER_GUIDE.md    How to install and use Lcloud
+├── CHANGELOG.md         Detailed release notes
+└── CLAUDE.md            Development context (for Claude Code sessions)
 ```
 
 ## Tech Stack
@@ -83,14 +89,6 @@ lcloud/
 | Device discovery | UDP multicast (224.0.0.167:53317) |
 | File transfer | HTTPS with self-signed cert + fingerprint trust |
 | Storage | Local only — your PC, your files |
-
-## Build Environment
-
-| Tool | Location |
-|------|----------|
-| Flutter 3.41.6 | `H:\fun\tools\flutter\bin` |
-| JDK 17 | `H:\fun\tools\jdk-17.0.18+8` |
-| Python 3.12 | System PATH |
 
 ## Contributing
 

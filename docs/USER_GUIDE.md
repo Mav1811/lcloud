@@ -1,96 +1,88 @@
 # Lcloud — User Guide
-**Version 0.1.0** | Open Source | No cloud, no account, no internet required
+**Version 0.3** · No cloud · No account · No internet required
 
 ---
 
 ## What Is Lcloud?
 
-Lcloud backs up your Android phone to your Windows PC over your home WiFi.  
-- No cables needed  
-- No internet or cloud accounts  
-- Files are organized automatically (Photos, Videos, WhatsApp, Documents)  
-- Completely free and open source  
+Lcloud backs up your Android phone to your Windows PC over your home WiFi.
+
+- No cables, no accounts, no internet
+- Files organized automatically: `Photos/2026/04/`, `WhatsApp/Images/`, etc.
+- Restore backed-up files back to your phone at any time
+- Completely free and open source
 
 ---
 
-## Before You Start — Install These (One Time Only)
+## First-Time Setup
 
-### Step 1: Install Python (for the PC app)
+### PC App
 
-1. Download Python 3.12 from: https://www.python.org/ftp/python/3.12.9/python-3.12.9-amd64.exe
-2. Run the installer
-3. **CRITICAL:** Check the box "Add Python to PATH" at the bottom of the first screen
-4. Click "Install Now"
+1. Go to `lcloud-pc/`
+2. Double-click `setup.bat` (first time only — installs dependencies)
+3. Double-click `run.bat` to start Lcloud
+4. Lcloud appears in your **system tray** (bottom-right corner, near the clock)
+5. Click the tray icon → **Open Lcloud**
+6. Click **Change** to pick your backup folder
 
-To verify: open Command Prompt and type `python --version` — you should see `Python 3.12.x`
+You can also just double-click **`Lcloud.exe`** if you downloaded the pre-built binary.
 
----
+### Android App
 
-### Step 2: Set Up the PC App
+Install **`lcloud-android.apk`** on your phone (from the releases section or build from source).
 
-1. Open File Explorer, go to `H:\fun\lcloud\lcloud-pc\`
-2. Double-click `setup.bat`
-3. Wait for it to finish (downloads ~50MB of packages)
-4. You should see "Setup complete!" at the end
-
----
-
-### Step 3: Install Flutter (for building the Android app)
-
-1. Go to `H:\fun\lcloud\tools\`
-2. Double-click `install_flutter.bat`
-3. Wait — this downloads Flutter SDK (~1GB). This is a one-time step.
-4. After it finishes, follow the on-screen instructions to add Flutter to PATH
+On first launch, grant the storage permission when prompted — Lcloud needs it to read your files.
 
 ---
 
-### Step 4: Build the Android App
+## Running a Backup
 
-Once Flutter is installed and in PATH:
+1. Make sure your phone and PC are on the **same WiFi network**
+2. Start the PC app (or make sure it's already running in the system tray)
+3. Open Lcloud on your phone
+4. Wait for **"PC Found: [your PC name]"** to appear — usually 2–5 seconds
+5. Tap **Backup Now**
 
-1. Open Command Prompt
-2. Navigate: `cd H:\fun\lcloud\lcloud-android`
-3. Run: `flutter pub get` (downloads Dart packages)
-4. Connect your Android phone via USB
-5. On your phone: Settings → Developer Options → Enable USB Debugging
-6. Run: `flutter run` (builds and installs on your phone)
-
-> **Note:** First build takes 5–10 minutes. Subsequent builds are fast.
+Files will stream from your phone to the PC. You'll see progress on both screens.
 
 ---
 
-## Using Lcloud
+## Restoring Files
 
-### On Your PC
+1. Open Lcloud on your phone
+2. Wait for PC to be found
+3. Tap **Restore** (below the Backup Now button)
+4. Browse your backup sessions
+5. Use the category tabs (Photos / Videos / WhatsApp / Documents) to filter
+6. Tap a session to expand it, check the files you want
+7. Tap **Restore N files**
 
-1. Double-click `H:\fun\lcloud\lcloud-pc\run.bat`
-2. Lcloud appears in your **system tray** (bottom-right corner, near the clock)
-3. Click the tray icon → "Open Lcloud" to see the main window
-4. First time: click **"Change"** to select your backup folder
-
-### On Your Phone
-
-1. Open the Lcloud app
-2. The app will scan your files and search for your PC on WiFi
-3. When it says **"PC Found: [your PC name]"** — you're connected
-4. Tap **"Backup Now"** to start
-
-### Automatic Backup
-(Coming in v0.2) — When your phone storage drops below 15%, backup starts automatically.
+**What happens:**
+- Files are restored to their exact original location on your phone
+- If a file already exists, it is skipped (no overwrite)
+- If the original folder is missing, you'll be asked: create it or save to `Lcloud_Restored/` instead
 
 ---
 
 ## File Organization
 
-Your files are organized like this on the PC:
+Your backup folder looks like this:
 
 ```
 [Your Backup Folder]/
-├── Photos/2025/04/   ← Photos by year and month
-├── Videos/2025/04/
-├── WhatsApp/Images/  ← WhatsApp media (images, video, audio, docs)
-├── Documents/2025/
-└── Other/2025/
+├── Photos/
+│   └── 2026/04/     ← Photos sorted by year and month
+├── Videos/
+│   └── 2026/04/
+├── WhatsApp/
+│   ├── Images/
+│   ├── Video/
+│   ├── Audio/
+│   └── Documents/
+├── Documents/
+│   └── 2026/04/
+└── Other/
+    └── 2026/04/
 ```
 
 ---
@@ -99,29 +91,50 @@ Your files are organized like this on the PC:
 
 | Problem | Solution |
 |---------|---------|
-| "PC not found" on phone | Make sure phone and PC are on the same WiFi network |
-| setup.bat fails with Python error | Make sure Python is installed and "Add to PATH" was checked |
+| "PC not found" on phone | Phone and PC must be on the same WiFi (not one on 5GHz, one on 2.4GHz bands that are isolated) |
+| `setup.bat` fails | Make sure Python 3.12 is installed and added to PATH |
 | App won't start | Run `run.bat` from Command Prompt to see error messages |
-| Files not found on Android | Grant "All files access" permission in phone settings → Apps → Lcloud |
-| Flutter build fails | Run `flutter doctor` and fix any issues it reports |
+| Files not visible on Android | Grant "All files access" in phone Settings → Apps → Lcloud → Permissions |
+| Restore shows "Not found on PC" | The backed-up file was moved or deleted from the backup folder |
 
 ---
 
 ## Privacy
 
 - No data ever leaves your home network
-- No analytics, no telemetry, no accounts
-- All file transfer happens directly between your phone and PC
-- Source code is fully open at: github.com/lcloud-app/lcloud (coming in v0.5)
+- No analytics, no telemetry, no accounts required
+- All transfer happens directly between your phone and PC over HTTPS
+- Source code: github.com/Mav1811/lcloud
 
 ---
 
-## Version History
+## Building from Source
 
-| Version | What's new |
-|---------|-----------|
-| 0.1.0 | First working prototype: manual backup, file organization, PC/phone connection |
-| 0.2.0 | Smart priority, storage trigger, delete-after-backup (coming soon) |
-| 0.3.0 | Duplicate detection, resume, backup history |
-| 0.4.0 | Encryption |
-| 0.5.0 | GitHub open source release |
+**PC app:**
+```bat
+cd lcloud-pc
+setup.bat       # creates venv, installs deps
+run.bat         # start
+```
+
+**Android app:**
+```bat
+cd lcloud-android
+flutter run     # build and deploy to connected phone
+```
+
+**Run tests:**
+```bat
+cd lcloud-pc
+call venv\Scripts\activate
+pytest tests\ -v
+
+cd lcloud-android
+flutter test
+```
+
+**Build release binaries:**
+```bat
+build-pc.bat        # → Lcloud.exe (PyInstaller)
+build-android.bat   # → lcloud-android.apk
+```
