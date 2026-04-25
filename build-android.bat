@@ -14,9 +14,9 @@ if not exist "%FLUTTER%" (
     exit /b 1
 )
 
-echo Building release APK...
+echo Building release APK (arm64-v8a, minSdk 29)...
 cd lcloud-android
-call "%FLUTTER%" build apk --release
+call "%FLUTTER%" build apk --release --target-platform android-arm64
 
 if errorlevel 1 (
     echo.
