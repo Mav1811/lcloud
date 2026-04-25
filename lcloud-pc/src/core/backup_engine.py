@@ -51,11 +51,12 @@ class _FileEntry:
     file_name: str
     size: int
     file_type: str
-    path: str
+    path: str          # original phone path (used as originalPath in manifest)
     category: str
     modified_at: datetime
     token: str = field(default_factory=lambda: str(uuid.uuid4()))
     done: bool = False
+    backed_up_path: str = ""   # relative to backup_root (posix), set after organize()
 
 
 @dataclass
@@ -64,6 +65,8 @@ class _Session:
     files: dict[str, _FileEntry]   # fileId → _FileEntry
     bytes_received: int = 0
     files_done: int = 0
+    device_alias: str = ""
+    started_at: datetime = field(default_factory=datetime.now)
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +150,12 @@ class _Handler(BaseHTTPRequestHandler):
             )
             files[fid] = entry
 
-        session = _Session(session_id=session_id, files=files)
+        session = _Session(
+            session_id=session_id,
+            files=files,
+            device_alias=body.get("deviceAlias", "Unknown"),
+            started_at=datetime.now(),
+        )
         with self.engine._lock:
             self.engine._sessions[session_id] = session
 
@@ -190,13 +198,18 @@ class _Handler(BaseHTTPRequestHandler):
                 tmp_path = Path(tmp.name)
 
             organizer_path = entry.path if entry.path else entry.file_name
-            self.engine._organizer.organize(
+            dest_path = self.engine._organizer.organize(
                 source_path=tmp_path,
                 original_name=organizer_path,
                 backup_root=self.engine.backup_folder,
                 modified_at=entry.modified_at,
             )
             tmp_path.unlink(missing_ok=True)
+            try:
+                rel = dest_path.relative_to(self.engine.backup_folder)
+                entry.backed_up_path = rel.as_posix()
+            except ValueError:
+                entry.backed_up_path = dest_path.as_posix()
             entry.done = True
 
         except Exception as exc:
@@ -219,6 +232,7 @@ class _Handler(BaseHTTPRequestHandler):
 
         if done == total:
             errors = [fid for fid, f in session.files.items() if not f.done]
+            self.engine._write_manifest(session)
             if self.engine._on_complete:
                 self.engine._on_complete(done, bytes_done, errors)
             with self.engine._lock:
@@ -324,6 +338,46 @@ class BackupEngine:
         )
         self._server_thread.start()
         logger.info("HTTPS backup server listening on port %s", self.port)
+
+    def _write_manifest(self, session: "_Session") -> None:
+        """Write a JSON manifest after a successful backup session."""
+        if not self.backup_folder:
+            return
+        manifest_dir = self.backup_folder / ".lcloud" / "manifests"
+        try:
+            manifest_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.error("Cannot create manifest directory: %s", exc)
+            return
+
+        files_data = [
+            {
+                "fileId":       entry.file_id,
+                "fileName":     entry.file_name,
+                "originalPath": entry.path,
+                "backedUpPath": entry.backed_up_path,
+                "category":     entry.category,
+                "sizeBytes":    entry.size,
+                "modifiedAt":   entry.modified_at.isoformat(),
+            }
+            for entry in session.files.values()
+            if entry.done and entry.backed_up_path
+        ]
+
+        manifest = {
+            "sessionId":   session.session_id,
+            "startedAt":   session.started_at.isoformat(),
+            "completedAt": datetime.now().isoformat(),
+            "deviceAlias": session.device_alias,
+            "files":       files_data,
+        }
+
+        path = manifest_dir / f"{session.session_id}.json"
+        try:
+            path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            logger.info("Manifest written: %s (%d files)", path.name, len(files_data))
+        except OSError as exc:
+            logger.error("Failed to write manifest: %s", exc)
 
     def stop_server(self) -> None:
         if self._server:

@@ -176,7 +176,7 @@ class TestUpload:
         assert status == 200
         assert body["success"] is True
 
-        saved = [f for f in backup_folder.rglob("*") if f.is_file()]
+        saved = [f for f in backup_folder.rglob("*") if f.is_file() and ".lcloud" not in f.parts]
         assert len(saved) == 1
 
     def test_401_on_bad_token(self, engine_with_folder):
@@ -248,3 +248,66 @@ class TestCancel:
             b"x",
         )
         assert status2 == 401
+
+
+class TestManifest:
+    def test_manifest_written_after_full_upload(self, engine_with_folder):
+        """After a complete backup session, a manifest JSON must exist."""
+        engine, backup_folder, _ = engine_with_folder
+
+        _, prep = _post_json(engine.port, "/api/lcloud/v2/prepare-upload", {
+            "deviceAlias": "TestPhone",
+            "files": [
+                {
+                    "fileId": "f1", "fileName": "photo.jpg", "size": 3,
+                    "fileType": "image/jpeg",
+                    "path": "/storage/emulated/0/DCIM/Camera/photo.jpg",
+                    "category": "photo", "modifiedAt": "2026-04-19T14:00:00",
+                }
+            ],
+        })
+        session_id = prep["sessionId"]
+        token = prep["files"]["f1"]
+
+        _post_raw(
+            engine.port,
+            f"/api/lcloud/v2/upload?sessionId={session_id}&fileId=f1&token={token}",
+            b"\xff\xd8\xff",
+        )
+
+        manifest_path = backup_folder / ".lcloud" / "manifests" / f"{session_id}.json"
+        assert manifest_path.exists(), "manifest file was not created"
+
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert data["sessionId"] == session_id
+        assert data["deviceAlias"] == "TestPhone"
+        assert len(data["files"]) == 1
+
+        f = data["files"][0]
+        assert f["fileId"] == "f1"
+        assert f["originalPath"] == "/storage/emulated/0/DCIM/Camera/photo.jpg"
+        assert f["category"] == "photo"
+        assert f["backedUpPath"].endswith("photo.jpg")
+        assert "/" in f["backedUpPath"]   # forward slashes (posix)
+
+    def test_no_manifest_written_if_session_cancelled(self, engine_with_folder):
+        """Cancelled sessions must NOT produce a manifest."""
+        engine, backup_folder, _ = engine_with_folder
+
+        _, prep = _post_json(engine.port, "/api/lcloud/v2/prepare-upload", {
+            "deviceAlias": "Phone",
+            "files": [
+                {
+                    "fileId": "f1", "fileName": "x.jpg", "size": 1,
+                    "fileType": "image/jpeg", "path": "/x.jpg",
+                    "category": "photo", "modifiedAt": "2026-01-01T00:00:00",
+                }
+            ],
+        })
+        session_id = prep["sessionId"]
+
+        _post_json(engine.port, f"/api/lcloud/v2/cancel?sessionId={session_id}", {})
+
+        manifest_dir = backup_folder / ".lcloud" / "manifests"
+        manifests = list(manifest_dir.glob("*.json")) if manifest_dir.exists() else []
+        assert manifests == [], "manifest must not be written for cancelled session"
