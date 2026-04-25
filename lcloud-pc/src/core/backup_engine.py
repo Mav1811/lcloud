@@ -23,10 +23,19 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlparse
 
+import mimetypes
+
 from config import LCLOUD_PORT, MIN_FREE_SPACE_BYTES
 from core.file_organizer import FileOrganizer
+from core.restore_handler import RestoreHandler
 
 logger = logging.getLogger(__name__)
+
+
+def _content_type(path: Path) -> str:
+    ct, _ = mimetypes.guess_type(str(path))
+    return ct or "application/octet-stream"
+
 
 # ---------------------------------------------------------------------------
 # Callback type aliases
@@ -82,12 +91,22 @@ class _Handler(BaseHTTPRequestHandler):
         logger.debug("HTTP %s", format % args)
 
     def do_GET(self) -> None:
-        if self.path == "/api/lcloud/v2/info":
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        route = parsed.path
+
+        if route == "/api/lcloud/v2/info":
             self._json(200, {
                 "alias": self.engine.alias,
                 "fingerprint": self.engine.fingerprint,
                 "deviceType": "desktop",
             })
+        elif route == "/api/lcloud/v2/restore/sessions":
+            self._handle_restore_sessions()
+        elif route == "/api/lcloud/v2/restore/files":
+            self._handle_restore_files(params)
+        elif route == "/api/lcloud/v2/restore/file":
+            self._handle_restore_file(params)
         else:
             self._json(404, {"error": "not_found"})
 
@@ -248,6 +267,59 @@ class _Handler(BaseHTTPRequestHandler):
         logger.info("Session %s cancelled", session_id)
         self._json(200, {"cancelled": True})
 
+    def _handle_restore_sessions(self) -> None:
+        if not self.engine.backup_folder:
+            self._json(404, {"error": "no_backup_folder"})
+            return
+        sessions = self.engine._restore.get_sessions(self.engine.backup_folder)
+        self._json(200, {"sessions": sessions})
+
+    def _handle_restore_files(self, params: dict) -> None:
+        session_id = params.get("sessionId", [None])[0]
+        category   = params.get("category",  [None])[0]
+        if not session_id:
+            self._json(400, {"error": "missing_sessionId"})
+            return
+        if not self.engine.backup_folder:
+            self._json(503, {"error": "no_backup_folder"})
+            return
+        result = self.engine._restore.get_files(
+            self.engine.backup_folder, session_id, category
+        )
+        if result is None:
+            self._json(404, {"error": "session_not_found"})
+            return
+        self._json(200, result)
+
+    def _handle_restore_file(self, params: dict) -> None:
+        token = params.get("token", [None])[0]
+        if not token:
+            self._json(401, {"error": "missing_token"})
+            return
+        file_path_str = self.engine._restore.resolve_token(token)
+        if file_path_str is None:
+            self._json(401, {"error": "invalid_or_expired_token"})
+            return
+        path = Path(file_path_str)
+        if not path.exists():
+            self._json(404, {"error": "file_not_found"})
+            return
+        try:
+            size = path.stat().st_size
+            ct = _content_type(path)
+            self.send_response(200)
+            self.send_header("Content-Type", ct)
+            self.send_header("Content-Length", str(size))
+            self.end_headers()
+            with open(path, "rb") as fh:
+                while True:
+                    chunk = fh.read(65536)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except OSError as exc:
+            logger.error("Failed to stream restore file: %s", exc)
+
     # ------------------------------------------------------------------
 
     def _read_json(self) -> dict | None:
@@ -295,6 +367,7 @@ class BackupEngine:
         self._server: HTTPServer | None = None
         self._server_thread: threading.Thread | None = None
         self._organizer = FileOrganizer()
+        self._restore = RestoreHandler()
 
     def start_server(
         self,

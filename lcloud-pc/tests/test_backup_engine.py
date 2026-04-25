@@ -311,3 +311,143 @@ class TestManifest:
         manifest_dir = backup_folder / ".lcloud" / "manifests"
         manifests = list(manifest_dir.glob("*.json")) if manifest_dir.exists() else []
         assert manifests == [], "manifest must not be written for cancelled session"
+
+
+class TestRestoreEndpoints:
+    """End-to-end tests hitting the live HTTPS server restore endpoints."""
+
+    def _upload_one_file(self, engine, content: bytes = b"\xff\xd8\xff"):
+        """Helper: run a full prepare+upload cycle; return session_id."""
+        _, prep = _post_json(engine.port, "/api/lcloud/v2/prepare-upload", {
+            "deviceAlias": "Phone",
+            "files": [
+                {
+                    "fileId": "f1", "fileName": "photo.jpg", "size": len(content),
+                    "fileType": "image/jpeg",
+                    "path": "/storage/emulated/0/DCIM/photo.jpg",
+                    "category": "photo", "modifiedAt": "2026-04-19T10:00:00",
+                }
+            ],
+        })
+        session_id = prep["sessionId"]
+        token = prep["files"]["f1"]
+        _post_raw(
+            engine.port,
+            f"/api/lcloud/v2/upload?sessionId={session_id}&fileId=f1&token={token}",
+            content,
+        )
+        return session_id
+
+    def test_sessions_returns_list_after_backup(self, engine_with_folder):
+        engine, _, _ = engine_with_folder
+        self._upload_one_file(engine)
+
+        status, body = _get(engine.port, "/api/lcloud/v2/restore/sessions")
+        assert status == 200
+        assert "sessions" in body
+        assert len(body["sessions"]) == 1
+        s = body["sessions"][0]
+        assert s["fileCount"] == 1
+        assert s["deviceAlias"] == "Phone"
+
+    def test_sessions_404_when_no_backup_folder(self, tmp_path):
+        cert_path = tmp_path / "lcloud.crt"
+        key_path = tmp_path / "lcloud.key"
+        load_or_generate(cert_path, key_path)
+        engine = BackupEngine()
+        engine.start_server(
+            backup_folder=None, cert_path=cert_path, key_path=key_path,
+            alias="X", fingerprint="x", port=0,
+        )
+        try:
+            try:
+                _get(engine.port, "/api/lcloud/v2/restore/sessions")
+                assert False, "expected 404"
+            except urllib.error.HTTPError as e:
+                assert e.code == 404
+        finally:
+            engine.stop_server()
+
+    def test_restore_files_returns_file_listing(self, engine_with_folder):
+        engine, _, _ = engine_with_folder
+        session_id = self._upload_one_file(engine)
+
+        status, body = _get(
+            engine.port,
+            f"/api/lcloud/v2/restore/files?sessionId={session_id}",
+        )
+        assert status == 200
+        assert body["sessionId"] == session_id
+        assert len(body["files"]) == 1
+        f = body["files"][0]
+        assert f["fileId"] == "f1"
+        assert f["available"] is True
+        assert "f1" in body["tokens"]
+
+    def test_restore_files_404_for_unknown_session(self, engine_with_folder):
+        engine, _, _ = engine_with_folder
+        try:
+            _get(engine.port, "/api/lcloud/v2/restore/files?sessionId=no-such-session")
+            assert False, "expected 404"
+        except urllib.error.HTTPError as e:
+            assert e.code == 404
+
+    def test_restore_file_streams_bytes(self, engine_with_folder):
+        engine, _, _ = engine_with_folder
+        content = b"\xff\xd8\xff" * 10
+        self._upload_one_file(engine, content=content)
+
+        _, sessions_body = _get(engine.port, "/api/lcloud/v2/restore/sessions")
+        session_id = sessions_body["sessions"][0]["sessionId"]
+        _, files_body = _get(
+            engine.port,
+            f"/api/lcloud/v2/restore/files?sessionId={session_id}",
+        )
+        token = files_body["tokens"]["f1"]
+
+        ctx = _ssl_ctx()
+        req = urllib.request.Request(
+            f"https://127.0.0.1:{engine.port}/api/lcloud/v2/restore/file"
+            f"?sessionId={session_id}&fileId=f1&token={token}"
+        )
+        with urllib.request.urlopen(req, context=ctx, timeout=5) as resp:
+            body_bytes = resp.read()
+        assert body_bytes == content
+
+    def test_restore_file_401_on_bad_token(self, engine_with_folder):
+        engine, _, _ = engine_with_folder
+        try:
+            ctx = _ssl_ctx()
+            req = urllib.request.Request(
+                f"https://127.0.0.1:{engine.port}/api/lcloud/v2/restore/file"
+                f"?sessionId=x&fileId=y&token=invalid"
+            )
+            urllib.request.urlopen(req, context=ctx, timeout=5)
+            assert False, "expected 401"
+        except urllib.error.HTTPError as e:
+            assert e.code == 401
+
+    def test_restore_file_token_is_one_time(self, engine_with_folder):
+        engine, _, _ = engine_with_folder
+        self._upload_one_file(engine)
+
+        _, sessions_body = _get(engine.port, "/api/lcloud/v2/restore/sessions")
+        session_id = sessions_body["sessions"][0]["sessionId"]
+        _, files_body = _get(
+            engine.port,
+            f"/api/lcloud/v2/restore/files?sessionId={session_id}",
+        )
+        token = files_body["tokens"]["f1"]
+
+        ctx = _ssl_ctx()
+        req = urllib.request.Request(
+            f"https://127.0.0.1:{engine.port}/api/lcloud/v2/restore/file"
+            f"?sessionId={session_id}&fileId=f1&token={token}"
+        )
+        urllib.request.urlopen(req, context=ctx, timeout=5).close()
+
+        try:
+            urllib.request.urlopen(req, context=ctx, timeout=5)
+            assert False, "expected 401 on second use"
+        except urllib.error.HTTPError as e:
+            assert e.code == 401
