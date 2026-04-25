@@ -10,6 +10,7 @@ import '../services/file_scanner.dart';
 import '../services/transfer_client.dart';
 import '../widgets/progress_card.dart';
 import '../widgets/status_card.dart' as sc;
+import 'restore_screen.dart';
 import 'settings_screen.dart';
 
 const Color _bgColor = Color(0xFF1a1a2e);
@@ -367,6 +368,36 @@ class _HomeScreenState extends State<HomeScreen> {
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                       color: Colors.white),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton(
+                onPressed: _pc == null
+                    ? null
+                    : () => Navigator.push(
+                          context,
+                          MaterialPageRoute<void>(
+                            builder: (_) => RestoreScreen(pc: _pc!),
+                          ),
+                        ),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(
+                      color: _pc == null ? Colors.white24 : _accentColor),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Text(
+                  'Restore',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: _pc == null ? Colors.white24 : _accentColor),
                 ),
               ),
             ),
