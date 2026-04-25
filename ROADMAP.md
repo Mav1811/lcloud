@@ -29,15 +29,15 @@ End-to-end working backup. mDNS discovery (replaced in v0.2). Manual backup only
 Replaced broken mDNS + HTTP pull with LocalSend-inspired multicast UDP + HTTPS push.  
 Self-signed cert with fingerprint trust. Real streaming progress. No more Zeroconf.
 
-### v0.3 — Core Features 🔨 IN PROGRESS
+### v0.3 — Core Features ✅ DONE
 
-**Restore (in progress):**
+**Restore (shipped 2026-04-25):**
 - Browse backed-up sessions on phone
 - Select files by category/session
 - Restore to exact original phone location
 - Handles missing folders, skips existing files
 
-**Still to build this version:**
+**Still to build (pushed to v0.4+):**
 - Priority engine (WhatsApp → Photos → Videos → Docs → Other)
 - Storage threshold trigger (phone < 15% free → auto-backup starts)
 - "Delete after backup" — actually execute the delete

@@ -5,13 +5,27 @@ Format: `[Version] — Date | What changed`
 
 ---
 
-## [0.3.0] — In Progress
+## [0.3.0] — 2026-04-25
 
-### In Progress
-- File restore: browse backed-up sessions on phone, select files, restore to original location
-- Manifest writing: PC writes `{backup_root}/.lcloud/manifests/{session_id}.json` after each backup
-- Three new restore endpoints: GET /restore/sessions, /restore/files, /restore/file
-- RestoreScreen: category tabs, expandable sessions, file checkboxes, progress, summary
+### Added
+- **File restore:** Browse backed-up sessions on phone, select files by category, restore to original location
+- **Manifest writing:** PC writes `{backup_root}/.lcloud/manifests/{session_id}.json` after each completed backup — records `originalPath` + `backedUpPath` per file
+- **Three new GET endpoints** on the HTTPS server:
+  - `GET /api/lcloud/v2/restore/sessions` — list all sessions with file count + total size
+  - `GET /api/lcloud/v2/restore/files?sessionId&category` — file listing with one-time tokens
+  - `GET /api/lcloud/v2/restore/file?sessionId&fileId&token` — stream file back to phone
+- **One-time tokens:** Each file gets a UUID token issued at listing time; consumed on first download (no replay)
+- **RestoreScreen:** Category tabs (All/Photos/Videos/WhatsApp/Documents), expandable session rows, file checkboxes, Select All per session, per-file progress via ProgressCard
+- **Missing folder handling:** Dialog prompts user to Create Folder or use `Lcloud_Restored/` fallback; one prompt per unique folder, cached for the session
+- **Skip existing files:** Files that already exist at their original path are skipped (no overwrite)
+- **Summary view:** Restored / Skipped / Failed counts; Retry Failed button re-queues failed files
+- **Restore button** on HomeScreen below Backup Now; disabled when no PC discovered
+
+### Tests
+- PC: 2 tests for manifest writing (`TestManifest`)
+- PC: 7 tests for restore endpoints (`TestRestoreEndpoints`)
+- PC: 13 tests for `RestoreHandler` (sessions, files, one-time tokens)
+- Android: 8 tests for `RestoreSession` / `RestoreFile` / `RestoreFileListing` data classes
 
 ---
 

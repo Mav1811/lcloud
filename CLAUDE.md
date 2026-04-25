@@ -32,7 +32,7 @@ Automatic WiFi backup from Android phone to Windows PC. No cloud, no internet, n
 |---------|--------|------------|
 | v0.1 | ✅ Done | Working prototype — manual backup, file organization |
 | v0.2 | ✅ Done | LocalSend-inspired transport (HTTPS push, cert trust, multicast discovery) |
-| v0.3 | 🔨 In Progress | Restore feature (manifests + 3 endpoints + RestoreScreen) |
+| v0.3 | ✅ Done | Restore feature (manifests + 3 endpoints + RestoreScreen) |
 | v0.4 | Planned | AES-256-GCM at-rest encryption |
 | v0.5 | Planned | Open source release, Windows auto-start service |
 
@@ -108,7 +108,7 @@ lcloud/
 │   │       ├── file_organizer.py← sorts files into Photos/Videos/WhatsApp/Docs/Other
 │   │       ├── discovery.py     ← UDP multicast broadcast (sends beacon every 2s)
 │   │       ├── certs.py         ← RSA-2048 self-signed cert generation + fingerprint
-│   │       └── restore_handler.py ← (v0.3, NOT YET CREATED)
+│   │       └── restore_handler.py ← manifest reader + one-time tokens (v0.3)
 │   ├── tests/
 │   │   ├── test_backup_engine.py← 8 tests: info, prepare, upload, cancel
 │   │   ├── test_certs.py        ← 6 tests: cert generation, fingerprint
@@ -124,16 +124,16 @@ lcloud/
     │   ├── models/
     │   │   ├── backup_file.dart
     │   │   ├── backup_session.dart
-    │   │   └── restore_session.dart  ← (v0.3, NOT YET CREATED)
+    │   │   └── restore_session.dart  ← RestoreSession/RestoreFile/RestoreFileListing (v0.3)
     │   ├── services/
     │   │   ├── discovery.dart        ← UDP multicast listen + DiscoveredPC model
     │   │   ├── file_scanner.dart
     │   │   ├── transfer_client.dart  ← HTTPS push client (prepareUpload/uploadFile/cancel)
-    │   │   └── restore_client.dart   ← (v0.3, NOT YET CREATED)
+    │   │   └── restore_client.dart   ← HTTPS client for restore endpoints (v0.3)
     │   ├── screens/
     │   │   ├── home_screen.dart      ← Backup Now button, discovery, progress
     │   │   ├── settings_screen.dart
-    │   │   └── restore_screen.dart   ← (v0.3, NOT YET CREATED)
+    │   │   └── restore_screen.dart   ← category tabs, session rows, restore flow (v0.3)
     │   └── widgets/
     │       ├── progress_card.dart
     │       └── status_card.dart
@@ -143,17 +143,14 @@ lcloud/
     └── test/
         ├── widget_test.dart
         ├── services/transfer_client_test.dart
-        └── models/restore_session_test.dart  ← (v0.3, NOT YET CREATED)
+        └── models/restore_session_test.dart  ← 8 tests for data class parsing (v0.3)
 ```
 
 ---
 
 ## v0.3 Restore Feature — Current In-Progress Work
 
-**Status:** Plan written, implementation NOT started. Tasks 1–9 are all pending.
-
-**Spec:** `docs/superpowers/specs/2026-04-22-restore-feature-design.md`
-**Plan:** `docs/superpowers/plans/2026-04-22-restore-feature.md`
+**Status:** ✅ COMPLETE. All 9 tasks done. Binaries rebuilt.
 
 ### How Restore Works
 
@@ -163,23 +160,21 @@ After every completed backup, PC writes a manifest:
 ```
 Records each file's `originalPath` (full phone path) and `backedUpPath` (relative to backup_root).
 
-Three new GET endpoints serve restore data. Android gets a new RestoreScreen with category tabs, expandable session rows, file checkboxes, and a restore loop that skips existing files and handles missing folders.
+Three new GET endpoints serve restore data. Android has a RestoreScreen with category tabs, expandable session rows, file checkboxes, and a restore loop that skips existing files and handles missing folders.
 
 ### Task Status
 
 | # | Task | Status |
 |---|------|--------|
-| 1 | PC: Add `MANIFEST_SUBDIR` to config.py | ⏳ Pending |
-| 2 | PC: RestoreHandler class (TDD) | ⏳ Pending |
-| 3 | PC: Manifest writing in backup_engine.py | ⏳ Pending |
-| 4 | PC: Wire restore endpoints into HTTPS server | ⏳ Pending |
-| 5 | Android: restore_session.dart data classes + tests | ⏳ Pending |
-| 6 | Android: restore_client.dart HTTPS client | ⏳ Pending |
-| 7 | Android: restore_screen.dart full UI | ⏳ Pending |
-| 8 | Android: Add Restore button to home_screen.dart | ⏳ Pending |
-| 9 | Rebuild Lcloud.exe and lcloud-android.apk | ⏳ Pending |
-
-**To resume restore work:** Say "resume the restore feature" — then invoke `superpowers:subagent-driven-development` and start from Task 1 using the plan at `docs/superpowers/plans/2026-04-22-restore-feature.md`.
+| 1 | PC: Add `MANIFEST_SUBDIR` to config.py | ✅ Done |
+| 2 | PC: RestoreHandler class (TDD) | ✅ Done |
+| 3 | PC: Manifest writing in backup_engine.py | ✅ Done |
+| 4 | PC: Wire restore endpoints into HTTPS server | ✅ Done |
+| 5 | Android: restore_session.dart data classes + tests | ✅ Done |
+| 6 | Android: restore_client.dart HTTPS client | ✅ Done |
+| 7 | Android: restore_screen.dart full UI | ✅ Done |
+| 8 | Android: Add Restore button to home_screen.dart | ✅ Done |
+| 9 | Rebuild Lcloud.exe and lcloud-android.apk | ✅ Done |
 
 ---
 
